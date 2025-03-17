@@ -11,7 +11,7 @@
 
 I'm using four mini PCs with a very minimalistic installation of Ubuntu Server.
 
-I made sure that all of the servers have current user created and I can login using a temporary password. This is essential for
+I made sure that all the servers have current user created and I can log in using a temporary password. This is essential for
 the first part of the setup process.
 
 ### Prepare the hosts

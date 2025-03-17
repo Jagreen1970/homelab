@@ -1,0 +1,42 @@
+# Ansible
+*.retry
+*.pyc
+__pycache__/
+ansible.log
+
+# Secrets and local config
+vault_password_file
+*.vault
+secrets.yml
+*secret*
+*credentials*
+*.key
+*.pem
+
+# Environment
+.env
+.venv
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.sublime-*
+*.code-workspace
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temp files
+*~
+*.swp
+*.swo
+*.tmp
+*.bak
