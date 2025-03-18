@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ford-tiny-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage-ford
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ford-small-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage-ford
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ford-medium-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage-ford
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ford-large-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage-ford
+  resources:
+    requests:
+      storage: 50Gi

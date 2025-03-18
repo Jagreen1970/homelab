@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: arthur-tiny-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage-arthur
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: arthur-small-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage-arthur
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: arthur-medium-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage-arthur
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: arthur-large-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage-arthur
+  resources:
+    requests:
+      storage: 50Gi

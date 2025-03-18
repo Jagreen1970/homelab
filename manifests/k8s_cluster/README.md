@@ -1,154 +1,157 @@
-# Kubernetes Storage Setup
+# Kubernetes Storage Management
 
-This directory contains manifests for setting up storage in your Kubernetes cluster.
+This directory contains storage configurations for the homelab Kubernetes cluster.
 
-## Local Storage Setup
+## Storage Resources
 
-Local storage provides volumes that are mounted directly from the node's filesystem.
+### NFS Storage (zaphod - Synology NAS)
+- **Total Available**: 1TB NFS shared folder
+- **StorageClass**: `nfs-storage` (Default)
+- **Provisioner**: Dynamic provisioning via NFS subdir external provisioner
+- **Usage**: Shared storage needs, backups, and generally persistent data
 
-### Setup Steps
+### Local Storage (Worker Nodes)
+Each worker node has dedicated local SSD storage configured with multiple volume sizes for different use cases:
 
-1. Create local storage directories on each node:
+#### trillian (200GB SSD)
+- **StorageClass**: `local-storage-trillian`
+- **Allocated Storage**:
+  - Tiny Volumes: 1 × 5GB
+  - Small Volumes: 1 × 10GB
+  - Medium Volumes: 1 × 20GB
+- **Reserved Space**:
+  - ~35GB allocated for persistent volumes
+  - ~65GB reserved for ephemeral storage
+  - ~100GB available for future allocation
 
-```bash
-kubectl apply -f node-local-storage-setup.yaml
-```
+#### arthur (400GB SSD)
+- **StorageClass**: `local-storage-arthur`
+- **Allocated Storage**:
+  - Tiny Volumes: 2 × 5GB
+  - Small Volumes: 1 × 10GB
+  - Medium Volumes: 1 × 20GB
+  - Large Volumes: 1 × 50GB
+- **Reserved Space**:
+  - ~90GB allocated for persistent volumes
+  - ~110GB reserved for ephemeral storage
+  - ~200GB available for future allocation
 
-Or alternatively use the DaemonSet approach to create directories on all nodes:
+#### ford (400GB SSD)
+- **StorageClass**: `local-storage-ford`
+- **Allocated Storage**:
+  - Tiny Volumes: 2 × 5GB
+  - Small Volumes: 1 × 10GB
+  - Medium Volumes: 1 × 20GB
+  - Large Volumes: 1 × 50GB
+- **Reserved Space**:
+  - ~90GB allocated for persistent volumes
+  - ~110GB reserved for ephemeral storage
+  - ~200GB available for future allocation
 
-```bash
-kubectl apply -f daemonset-local-storage-setup.yaml
-```
+## Storage Class Selection Guide
 
-2. Create the local storage class:
+1. **Default**: Use `nfs-storage` (NFS from zaphod) for:
+   - General purpose storage
+   - Shared data needs (ReadWriteMany)
+   - Data that needs to survive node failures
+   - Lower performance requirements
 
-```bash
-kubectl apply -f local-storage-class.yaml
-```
+2. **Local Storage**: Use node-specific storage classes for:
+   - Performance-critical workloads
+   - Applications with high I/O requirements
+   - Data that doesn't need to be shared between pods
+   - Note: Pods using local storage will be scheduled on the specific node
 
-3. Create local persistent volumes for each node:
+3. **Volume Size Selection**:
+   - **Tiny (5GB)**: Configuration files, small databases, lightweight applications
+   - **Small (10GB)**: Medium-sized applications, smaller databases
+   - **Medium (20GB)**: Larger applications, medium databases, analysis workloads
+   - **Large (50GB)**: Data-intensive applications, larger databases
 
-```bash
-# Edit local-pv-example.yaml to match your node names and storage requirements
-kubectl apply -f local-pv-example.yaml
-```
+4. **Ephemeral Storage**:
+   - Each node has reserved space for ephemeral storage
+   - Use for temporary files, caches, and emptyDir volumes
+   - Does not require PersistentVolumes or PersistentVolumeClaims
 
-4. Use the local storage in your applications:
+## Implementation Notes
 
-```bash
-kubectl apply -f local-pvc-example.yaml
-```
+1. Local storage is configured using StaticProvisioning with PersistentVolumes that specify node affinity
+2. The DaemonSet ensures the necessary directories are created on each node
+3. NFS storage uses a dynamic provisioner that creates subdirectories for each PVC
+4. For workloads requiring storage, always create a PVC rather than using volumes directly
+5. Additional persistent volumes can be created as needed following the established pattern
 
-## NFS Storage Setup (for NAS access)
+## Setup Instructions
 
-NFS storage allows your pods to access storage from your NAS (zaphod).
+### NFS Storage Setup
 
-### Configuring NFS on Synology NAS
-
-1. Enable NFS service:
-   - Log into the Synology DSM web interface
-   - Go to **Control Panel** → **File Services**
-   - Navigate to the **NFS** tab and check **Enable NFS**
-   - Click **Apply**
-
-2. Create a shared folder:
-   - Go to **Control Panel** → **Shared Folders**
-   - Click **Create** → **Create Shared Folder**
-   - Enter a name (e.g., `kubernetes`)
-   - Set appropriate permissions (recommended to have a dedicated user for Kubernetes)
-   - Click **OK**
-
-3. Configure NFS permissions:
-   - Go to **Control Panel** → **Shared Folders**
-   - Select your kubernetes folder
-   - Click **Edit** → **NFS Permissions**
-   - Click **Create**
-   - Enter the IP range for your Kubernetes nodes (e.g., `192.168.1.0/24` or specific IPs)
-   - Set the following permissions:
-     - Privilege: Read/Write
-     - Squash: No mapping (or Map all users to admin)
-     - Security: sys
-     - Enable asynchronous
-   - Click **OK** and **Apply**
-
-4. Note your export path:
-   - The NFS export path is typically in the format: `/volume1/kubernetes`
-   - This is the path you'll use in the `nfs-provisioner-deployment.yaml` file
-
-5. Verify NFS access from one of your Kubernetes nodes:
+1. Configure NFS on your Synology NAS as described in `zaphod/SYNOLOGY_NFS_SETUP.md`
+2. Deploy the NFS provisioner and RBAC:
    ```bash
-   # Install NFS client tools if needed
-   sudo apt-get install nfs-common
-   
-   # List NFS exports from your Synology
-   showmount -e zaphod
-   
-   # Test mount
-   sudo mkdir -p /mnt/test
-   sudo mount -t nfs zaphod:/volume1/kubernetes /mnt/test
-   
-   # Check if you can write to it
-   sudo touch /mnt/test/test_file
-   
-   # Unmount after testing
-   sudo umount /mnt/test
+   kubectl apply -f zaphod/nfs-provisioner-rbac.yaml
+   kubectl apply -f zaphod/nfs-provisioner-deployment.yaml
+   kubectl apply -f zaphod/nfs-storage-class.yaml
    ```
 
-6. Optimize NFS performance (optional):
-   - In Synology DSM, go to **Control Panel** → **File Services** → **NFS**
-   - Advanced Settings:
-     - Enable NFSv4.1 support
-     - Increase maximum number of connections if needed
-   - In the NFS export settings for your kubernetes share:
-     - Enable asynchronous mode for better performance (note: potential data loss during power outage)
-     - Consider adjusting security settings based on your network security requirements
+### Local Storage Setup
 
-### Setup Steps
+For each worker node (trillian, arthur, ford):
 
-1. Create the RBAC resources for the NFS provisioner:
+1. Create the storage directories on the node:
+   ```bash
+   # For trillian
+   kubectl apply -f trillian/daemonset-local-storage-setup.yaml
+   kubectl apply -f trillian/local-storage-class.yaml
+   kubectl apply -f trillian/node-local-storage-setup.yaml
+   
+   # For arthur
+   kubectl apply -f arthur/daemonset-local-storage-setup.yaml
+   kubectl apply -f arthur/local-storage-class.yaml
+   kubectl apply -f arthur/node-local-storage-setup.yaml
+   
+   # For ford
+   kubectl apply -f ford/daemonset-local-storage-setup.yaml
+   kubectl apply -f ford/local-storage-class.yaml
+   kubectl apply -f ford/node-local-storage-setup.yaml
+   ```
 
-```bash
-kubectl apply -f nfs-provisioner-rbac.yaml
-```
+## Usage Examples
 
-2. Deploy the NFS provisioner:
-
-```bash
-# Edit nfs-provisioner-deployment.yaml to match your NAS hostname/IP and export path
-kubectl apply -f nfs-provisioner-deployment.yaml
-```
-
-3. Create the NFS storage class:
-
-```bash
-kubectl apply -f nfs-provisioner-storage-class.yaml
-```
-
-4. Use NFS storage in your applications:
-
-```bash
-kubectl apply -f nfs-pvc-example.yaml
-```
-
-## Usage in Applications
-
-When deploying applications, reference the appropriate storage class:
-
-- For local storage: `storageClassName: local-storage`
-- For NFS storage: `storageClassName: nfs-client`
-
-Example PVC for an application:
-
+To create a PVC using the default NFS storage:
 ```yaml
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: my-app-data
+  name: my-nfs-pvc
 spec:
   accessModes:
-    - ReadWriteOnce  # Use ReadWriteMany for NFS if sharing across pods
-  storageClassName: nfs-client  # Or local-storage
+    - ReadWriteMany
+  storageClassName: nfs-storage
   resources:
     requests:
-      storage: 5Gi
+      storage: 10Gi
 ```
+
+To create a PVC using local storage on arthur:
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-local-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage-arthur
+  resources:
+    requests:
+      storage: 5Gi  # For a tiny volume
+```
+
+## Future Expansion
+
+When additional storage is needed, you can add more persistent volumes by:
+
+1. Adding new PV definitions to the node-specific yaml files
+2. Updating the DaemonSet to create and set permissions for new directories
+3. Following the existing naming conventions (nodename-size-number)
+4. Keeping track of the allocated storage in this README
