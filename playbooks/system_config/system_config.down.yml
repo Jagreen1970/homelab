@@ -7,17 +7,7 @@
   become: true
   
   tasks:
-    - name: Reset hostname to default
-      ansible.builtin.hostname:
-        name: "ubuntu"
-        use: systemd
-        
-    - name: Reset /etc/hosts entry
-      ansible.builtin.lineinfile:
-        path: /etc/hosts
-        regexp: '^127\.0\.1\.1'
-        line: "127.0.1.1 ubuntu"
-        state: present
+    # Hostname reset removed - not configuring hostnames in up playbook
         
     - name: Reset timezone to UTC
       community.general.timezone:

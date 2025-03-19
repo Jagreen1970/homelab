@@ -38,10 +38,9 @@ This file centralizes system configuration and can be adjusted for different env
 
 Our system configuration playbook handles:
 
-1. Setting the hostname (from inventory)
-2. Configuring timezone
-3. Setting locale settings
-4. Configuring NTP for time synchronization
+1. Configuring timezone
+2. Setting locale settings
+3. Configuring NTP for time synchronization
 
 The playbook is placed in `playbooks/system_config/system_config.up.yml`:
 
@@ -60,17 +59,7 @@ The playbook is placed in `playbooks/system_config/system_config.up.yml`:
         file: system_vars.yml
         name: system_vars
   
-    - name: Set hostname
-      ansible.builtin.hostname:
-        name: "{{ inventory_hostname }}"
-        use: systemd
-        
-    - name: Add hostname to /etc/hosts
-      ansible.builtin.lineinfile:
-        path: /etc/hosts
-        line: "127.0.1.1 {{ inventory_hostname }}"
-        regexp: '^127\.0\.1\.1'
-        state: present
+    # Hostname configuration removed - machines already have appropriate hostnames
         
     - name: Set timezone
       community.general.timezone:
@@ -89,13 +78,13 @@ ansible-playbook -i inventory.yml playbooks/system_config/system_config.up.yml
 
 Since we've already set up user management with sudo access, we don't need the `-K` flag anymore.
 
-## Hostname Configuration
+## Why Not Configure Hostnames?
 
-The playbook sets the hostname of each machine to match the name in your inventory file. This ensures that:
+We've intentionally excluded hostname configuration from our playbook. Since we're connecting to these machines using Ansible inventory:
 
-1. Each system has a recognizable, consistent hostname
-2. The hostname matches what Ansible uses to reference the machine
-3. The hostname is properly set in both the system and `/etc/hosts`
+1. Hostnames must already be properly configured to allow connections
+2. Changing hostnames after connection could cause confusion or connectivity issues
+3. Inventory names and machine hostnames should be aligned from initial setup
 
 ## Time Synchronization
 
@@ -119,11 +108,8 @@ We've also created a complementary `system_config.down.yml` playbook that can re
   become: true
   
   tasks:
-    - name: Reset hostname to default
-      ansible.builtin.hostname:
-        name: "ubuntu"
-        use: systemd
-        
+    # Hostname configuration tasks removed
+    
     # Other reset tasks...
 ```
 
