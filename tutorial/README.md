@@ -37,7 +37,7 @@ This project aims to create a fully-automated homelab environment using Ansible 
 │   ├── prepare.down.yml      # Teardown for base system
 │   ├── CLAUDE.md             # Style guidelines for playbooks
 │   ├── user_management/      # User management playbooks
-│   │   ├── user_management.yml     # Creates users, configures SSH
+│   │   ├── user_management.up.yml     # Creates users, configures SSH
 │   │   └── user_management.down.yml # Removes user configuration
 │   └── ... other playbook directories ...
 ├── manifests/                # Kubernetes manifests
