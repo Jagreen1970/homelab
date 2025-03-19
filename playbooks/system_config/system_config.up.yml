@@ -4,6 +4,7 @@
 
 - name: Configure basic system settings
   hosts: all
+  remote_user: admin
   become: true
   
   tasks:

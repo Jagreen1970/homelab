@@ -4,6 +4,7 @@
 
 - name: Remove admin user configuration
   hosts: all
+  remote_user: admin
   become: true
   
   tasks:

@@ -4,6 +4,7 @@
 
 - name: Reset system configuration
   hosts: all
+  remote_user: admin
   become: true
   
   tasks:
