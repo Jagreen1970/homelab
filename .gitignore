@@ -13,6 +13,10 @@ secrets.yml
 *.key
 *.pem
 
+# SSH keys - never commit these to version control
+ssh_keys/*
+!ssh_keys/.gitkeep
+
 # Environment
 .env
 .venv
