@@ -4,7 +4,6 @@
 
 - name: Configure admin users and SSH access
   hosts: all
-  remote_user: admin
   become: true
   
   tasks:

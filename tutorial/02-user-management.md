@@ -103,10 +103,10 @@ Note that we're using the specialized `community.general.sudoers` module instead
 Execute the playbook with:
 
 ```bash
-ansible-playbook -i inventory.yml playbooks/user_management/user_management.up.yml -K
+ansible-playbook -i inventory.yml playbooks/user_management/user_management.up.yml -k -K
 ```
 
-The `-K` flag will prompt for the sudo password, which is needed for the initial setup.
+The `-k` flag prompts for the SSH password of the default user, and the `-K` flag prompts for the sudo password. Both are needed for the initial setup when the admin user doesn't exist yet.
 
 ## Security Considerations
 
