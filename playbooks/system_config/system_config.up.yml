@@ -1,0 +1,58 @@
+---
+# System Configuration Playbook
+# This playbook configures hostname, timezone, and locale settings
+
+- name: Configure basic system settings
+  hosts: all
+  become: true
+  
+  tasks:
+    - name: Include system variables
+      ansible.builtin.include_vars:
+        file: system_vars.yml
+        name: system_vars
+  
+    - name: Set hostname
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}"
+        use: systemd
+        
+    - name: Add hostname to /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "127.0.1.1 {{ inventory_hostname }}"
+        regexp: '^127\.0\.1\.1'
+        state: present
+        
+    - name: Set timezone
+      community.general.timezone:
+        name: "{{ system_vars.timezone }}"
+        
+    - name: Generate and set locale
+      ansible.builtin.shell: |
+        locale-gen {{ system_vars.system_locale }}
+        update-locale LANG={{ system_vars.system_locale }} LC_ALL={{ system_vars.system_locale }}
+      args:
+        creates: /etc/default/locale
+      register: locale_result
+      changed_when: locale_result.rc == 0
+      
+    - name: Configure NTP service
+      ansible.builtin.service:
+        name: systemd-timesyncd
+        state: started
+        enabled: true
+        
+    - name: Configure NTP servers
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/timesyncd.conf
+        regexp: '^#?NTP='
+        line: "NTP={{ system_vars.ntp_servers | join(' ') }}"
+        state: present
+      notify: Restart timesyncd
+        
+  handlers:
+    - name: Restart timesyncd
+      ansible.builtin.service:
+        name: systemd-timesyncd
+        state: restarted
