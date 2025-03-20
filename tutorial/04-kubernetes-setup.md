@@ -51,7 +51,7 @@ Our Kubernetes cluster will consist of:
 
 ## Configuration Variables
 
-We define our Kubernetes configuration in a central variables file. Here's our `k8s_vars.yml`:
+We define our Kubernetes configuration in a central variables file. Here's our `kubernetes/k8s_vars.yml`:
 
 ```yaml
 ---
@@ -215,7 +215,7 @@ We also create an admin user, generate an access token, and configure the dashbo
 Execute the playbook with:
 
 ```bash
-ansible-playbook -i inventory.yml playbooks/k8s.up.yml
+ansible-playbook -i inventory.yml playbooks/kubernetes/k8s.up.yml
 ```
 
 This playbook will take some time to complete as it installs and configures all components across all nodes.
