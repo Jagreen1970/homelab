@@ -8,7 +8,7 @@ spec:
   accessModes:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage-arthur
+  storageClassName: local-storage
   local:
     path: /mnt/k8s-data/tiny-1
   nodeAffinity:
@@ -30,7 +30,7 @@ spec:
   accessModes:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage-arthur
+  storageClassName: local-storage
   local:
     path: /mnt/k8s-data/tiny-2
   nodeAffinity:
@@ -52,7 +52,7 @@ spec:
   accessModes:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage-arthur
+  storageClassName: local-storage
   local:
     path: /mnt/k8s-data/tiny-3
   nodeAffinity:
@@ -74,7 +74,7 @@ spec:
   accessModes:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage-arthur
+  storageClassName: local-storage
   local:
     path: /mnt/k8s-data/small-1
   nodeAffinity:
@@ -96,7 +96,7 @@ spec:
   accessModes:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage-arthur
+  storageClassName: local-storage
   local:
     path: /mnt/k8s-data/small-2
   nodeAffinity:
@@ -118,7 +118,7 @@ spec:
   accessModes:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage-arthur
+  storageClassName: local-storage
   local:
     path: /mnt/k8s-data/medium-1
   nodeAffinity:
@@ -140,7 +140,7 @@ spec:
   accessModes:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage-arthur
+  storageClassName: local-storage
   local:
     path: /mnt/k8s-data/large-1
   nodeAffinity:

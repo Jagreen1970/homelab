@@ -221,14 +221,25 @@ Common storage issues you may encounter include:
 - **Volume binding failures**: If your PVC fails to bind to a PV, check that the storage class names match exactly and that the requested storage size is available.
 - **Node affinity issues**: Local PVs are bound to specific nodes. Ensure your pods are scheduled on the correct nodes or use a topology-aware provisioner.
 
-For our homelab setup, we've created storage classes and persistent volumes for each node:
+For our homelab setup, we've created a common storage class and persistent volumes for each node:
 
-| Node | Storage Class | Available Volumes |
-|------|---------------|-------------------|
-| arthur | local-storage-arthur | 3 tiny (5Gi), 2 small (10Gi), 1 medium (20Gi), 1 large (50Gi) |
-| ford | local-storage-ford | 3 tiny (5Gi), 2 small (10Gi), 1 medium (20Gi), 1 large (50Gi) |
-| trillian | local-storage-trillian | 3 tiny (5Gi), 2 small (10Gi), 1 medium (20Gi), 1 large (50Gi) |
-| disasterarea | local-storage-disasterarea | 3 tiny (5Gi), 2 small (10Gi), 1 medium (20Gi), 1 large (50Gi) |
+| Node | Available Volumes | Notes |
+|------|-------------------|-------|
+| arthur | 3 tiny (5Gi), 2 small (10Gi), 1 medium (20Gi), 1 large (50Gi) | Uses NodeAffinity to target this node |
+| ford | 3 tiny (5Gi), 2 small (10Gi), 1 medium (20Gi), 1 large (50Gi) | Uses NodeAffinity to target this node |
+| trillian | 3 tiny (5Gi), 2 small (10Gi), 1 medium (20Gi), 1 large (50Gi) | Uses NodeAffinity to target this node |
+| disasterarea | 3 tiny (5Gi), 2 small (10Gi), 1 medium (20Gi), 1 large (50Gi) | Uses NodeAffinity to target this node |
+
+All nodes use the common `local-storage` StorageClass with the following configuration:
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-storage
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+```
 
 To set up storage initially on all nodes, use:
 
