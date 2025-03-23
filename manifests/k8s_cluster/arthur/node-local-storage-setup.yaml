@@ -45,6 +45,28 @@ spec:
 apiVersion: v1
 kind: PersistentVolume
 metadata:
+  name: arthur-tiny-3
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage-arthur
+  local:
+    path: /mnt/k8s-data/tiny-3
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - arthur
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
   name: arthur-small-1
 spec:
   capacity:
@@ -55,6 +77,28 @@ spec:
   storageClassName: local-storage-arthur
   local:
     path: /mnt/k8s-data/small-1
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - arthur
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: arthur-small-2
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage-arthur
+  local:
+    path: /mnt/k8s-data/small-2
   nodeAffinity:
     required:
       nodeSelectorTerms:

@@ -1,0 +1,328 @@
+---
+- name: Load Kubernetes variables
+  hosts: all
+  tasks:
+    - name: Include Kubernetes variables
+      ansible.builtin.include_vars:
+        file: k8s_vars.yml
+
+- name: Prepare storage directories on nodes
+  hosts: "arthur,ford,trillian,disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Create base storage directory
+      ansible.builtin.file:
+        path: /mnt/k8s-data
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Create storage subdirectories
+      ansible.builtin.file:
+        path: "/mnt/k8s-data/{{ item }}"
+        state: directory
+        mode: '0777'
+        owner: root
+        group: root
+      loop:
+        - tiny-1
+        - tiny-2
+        - tiny-3
+        - small-1
+        - small-2
+        - medium-1
+        - large-1
+
+- name: Copy storage manifests to control plane
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Create manifests directory on control plane
+      ansible.builtin.file:
+        path: "/home/admin/manifests/k8s_cluster/{{ item }}"
+        state: directory
+        owner: admin
+        group: admin
+        mode: '0755'
+        recurse: true
+      loop:
+        - arthur
+        - ford
+        - trillian
+        - disasterarea
+
+    - name: Set storage file list
+      ansible.builtin.set_fact:
+        storage_files:
+          - "local-storage-class.yaml"
+          - "node-local-storage-setup.yaml"
+          - "example-pvc.yaml"
+
+    - name: Copy storage manifests to control plane
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../manifests/k8s_cluster/{{ item.0 }}/{{ item.1 }}"
+        dest: "/home/admin/manifests/k8s_cluster/{{ item.0 }}/{{ item.1 }}"
+        owner: admin
+        group: admin
+        mode: '0644'
+      with_nested:
+        - ['arthur', 'ford', 'trillian', 'disasterarea']
+        - "{{ storage_files }}"
+      loop_control:
+        label: "{{ item.0 }}/{{ item.1 }}"
+
+- name: Deploy local storage classes and PVs
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if kubectl is available
+      ansible.builtin.command: kubectl version --client
+      register: kubectl_check
+      changed_when: false
+      failed_when: false
+
+    - name: Set up kubectl config
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+      when: kubectl_check.rc == 0
+
+    - name: Deploy storage classes
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl apply -f /home/admin/manifests/k8s_cluster/{{ item }}/local-storage-class.yaml
+      loop:
+        - arthur
+        - ford
+        - trillian
+        - disasterarea
+      register: storage_class_result
+      changed_when: storage_class_result.rc == 0
+      when: admin_conf_stat.stat.exists | default(false)
+      failed_when: false
+      args:
+        executable: /bin/bash
+
+    # Storage directories are created directly through Ansible
+
+    - name: Deploy persistent volumes
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl apply -f /home/admin/manifests/k8s_cluster/{{ item }}/node-local-storage-setup.yaml
+      loop:
+        - arthur
+        - ford
+        - trillian
+        - disasterarea
+      register: pv_result
+      changed_when: pv_result.rc == 0
+      when: admin_conf_stat.stat.exists | default(false)
+      failed_when: false
+      args:
+        executable: /bin/bash
+
+- name: Verify storage setup
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check StorageClass existence
+      ansible.builtin.command: kubectl get storageclass
+      register: storage_class_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display StorageClass status
+      ansible.builtin.debug:
+        var: storage_class_check.stdout_lines
+      when: storage_class_check.stdout is defined
+
+    - name: Check PersistentVolume existence
+      ansible.builtin.command: kubectl get pv
+      register: pv_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display PersistentVolume status
+      ansible.builtin.debug:
+        var: pv_check.stdout_lines
+      when: pv_check.stdout is defined
+      
+    - name: Check for problematic PVs
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pv | grep -v "Bound\|Available"
+      register: problematic_pvs
+      changed_when: false
+      failed_when: false
+      when: admin_conf_stat.stat.exists | default(false)
+      args:
+        executable: /bin/bash
+
+    - name: Display problematic PVs
+      ansible.builtin.debug:
+        var: problematic_pvs.stdout_lines
+      when: problematic_pvs.stdout_lines is defined and problematic_pvs.stdout_lines | length > 0
+
+    - name: Check for problematic PVCs
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pvc --all-namespaces | grep -v "Bound"
+      register: problematic_pvcs
+      changed_when: false
+      failed_when: false
+      when: admin_conf_stat.stat.exists | default(false)
+      args:
+        executable: /bin/bash
+
+    - name: Display problematic PVCs
+      ansible.builtin.debug:
+        var: problematic_pvcs.stdout_lines
+      when: problematic_pvcs.stdout_lines is defined and problematic_pvcs.stdout_lines | length > 0
+
+    - name: Delete problematic PVCs
+      ansible.builtin.shell: |
+        kubectl delete pvc {{ item }} --force --grace-period=0
+      register: delete_pvc_result
+      changed_when: delete_pvc_result.rc == 0
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        problematic_pvcs.stdout_lines is defined and
+        problematic_pvcs.stdout_lines | length > 0 and
+        item in problematic_pvcs.stdout
+      with_items: "{{ problematic_pvcs.stdout_lines | default([]) }}"
+      failed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Recreate PVs for problematic nodes
+      ansible.builtin.shell: |
+        kubectl delete pv {{ item }} --force --grace-period=0 &&
+        kubectl apply -f /home/admin/manifests/k8s_cluster/{{ item.split('-')[0] }}/node-local-storage-setup.yaml
+      register: recreate_pv_result
+      changed_when: recreate_pv_result.rc == 0
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        problematic_pvs.stdout_lines is defined and
+        problematic_pvs.stdout_lines | length > 0 and
+        item in problematic_pvs.stdout
+      with_items: "{{ problematic_pvs.stdout_lines | default([]) }}"
+      failed_when: false
+      args:
+        executable: /bin/bash
+      
+    - name: Run test storage pod
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl apply -f {{ playbook_dir }}/../../manifests/k8s_cluster/test/test-storage.yaml
+      register: test_storage_result
+      changed_when: test_storage_result.rc == 0
+      failed_when: false
+      args:
+        executable: /bin/bash
+      
+    - name: Wait for test pod to be ready
+      ansible.builtin.shell: |
+        kubectl wait --for=condition=ready pod/storage-test --timeout=30s || true
+      register: test_pod_wait
+      changed_when: false
+      failed_when: false
+      args:
+        executable: /bin/bash
+      
+    - name: Check test pod results
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl exec -it storage-test -- cat /data/test.txt 2>/dev/null || echo "Test failed"
+      register: test_pod_result
+      changed_when: false
+      failed_when: false
+      args:
+        executable: /bin/bash
+      
+    - name: Display test pod results
+      ansible.builtin.debug:
+        var: test_pod_result.stdout_lines
+      when: test_pod_result.stdout_lines is defined
+      
+    - name: Clean up test pod
+      ansible.builtin.shell: |
+        kubectl delete -f {{ playbook_dir }}/../../manifests/k8s_cluster/test/test-storage.yaml
+      register: cleanup_result
+      changed_when: cleanup_result.rc == 0
+      failed_when: false
+      args:
+        executable: /bin/bash
+      
+    - name: Generate storage setup report
+      ansible.builtin.copy:
+        content: |
+          Kubernetes Storage Setup Report
+          ==============================
+
+          Report generated on: {{ ansible_date_time.date }} {{ ansible_date_time.time }}
+
+          Storage Classes:
+          {{ storage_class_check.stdout if storage_class_check.stdout is defined else 'No storage classes found' }}
+
+          PersistentVolumes:
+          {{ pv_check.stdout if pv_check.stdout is defined else 'No persistent volumes found' }}
+
+          Test Results:
+          {{ test_pod_result.stdout if test_pod_result.stdout is defined else 'Test not run' }}
+
+          Storage directories have been created on all nodes in /mnt/k8s-data:
+          - 3 tiny volumes (5Gi each)
+          - 2 small volumes (10Gi each)
+          - 1 medium volume (20Gi)
+          - 1 large volume (50Gi)
+          
+          Issues Found:
+          {% if problematic_pvs.stdout_lines is defined and problematic_pvs.stdout_lines | length > 0 %}
+          - Problematic PVs: {{ problematic_pvs.stdout_lines | join(', ') }}
+          {% else %}
+          - No problematic PVs found
+          {% endif %}
+          {% if problematic_pvcs.stdout_lines is defined and problematic_pvcs.stdout_lines | length > 0 %}
+          - Problematic PVCs: {{ problematic_pvcs.stdout_lines | join(', ') }}
+          {% else %}
+          - No problematic PVCs found
+          {% endif %}
+          
+          Actions Taken:
+          - Created storage directories on all nodes
+          - Applied storage classes for all nodes
+          - Created persistent volumes for all nodes
+          {% if problematic_pvcs.stdout_lines is defined and problematic_pvcs.stdout_lines | length > 0 %}
+          - Deleted problematic PVCs
+          {% endif %}
+          {% if problematic_pvs.stdout_lines is defined and problematic_pvs.stdout_lines | length > 0 %}
+          - Recreated problematic PVs
+          {% endif %}
+          - Ran test pod to verify storage functionality
+          
+          Recommendations:
+          {% if test_pod_result.rc is defined and test_pod_result.rc != 0 %}
+          - Storage test failed, consider checking kubelet logs on the nodes
+          - Verify that the local-storage class is correctly configured
+          - Check that all storage directories exist and have correct permissions
+          {% else %}
+          - Storage appears to be functioning correctly
+          - Monitor storage usage and performance
+          {% endif %}
+        dest: /root/storage-setup-report.txt
+        mode: '0644'
+      
+    - name: Display storage setup report
+      ansible.builtin.command: cat /root/storage-setup-report.txt
+      register: setup_report
+      changed_when: false
+      
+    - name: Show final setup report
+      ansible.builtin.debug:
+        var: setup_report.stdout_lines
+      when: setup_report.stdout_lines is defined

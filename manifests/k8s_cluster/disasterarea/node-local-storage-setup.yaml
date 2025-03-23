@@ -1,14 +1,14 @@
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: trillian-tiny-1
+  name: disasterarea-tiny-1
 spec:
   capacity:
     storage: 5Gi
   accessModes:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage-trillian
+  storageClassName: local-storage-disasterarea
   local:
     path: /mnt/k8s-data/tiny-1
   nodeAffinity:
@@ -18,19 +18,19 @@ spec:
         - key: kubernetes.io/hostname
           operator: In
           values:
-          - trillian
+          - disasterarea
 ---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: trillian-tiny-2
+  name: disasterarea-tiny-2
 spec:
   capacity:
     storage: 5Gi
   accessModes:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage-trillian
+  storageClassName: local-storage-disasterarea
   local:
     path: /mnt/k8s-data/tiny-2
   nodeAffinity:
@@ -40,19 +40,19 @@ spec:
         - key: kubernetes.io/hostname
           operator: In
           values:
-          - trillian
+          - disasterarea
 ---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: trillian-tiny-3
+  name: disasterarea-tiny-3
 spec:
   capacity:
     storage: 5Gi
   accessModes:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage-trillian
+  storageClassName: local-storage-disasterarea
   local:
     path: /mnt/k8s-data/tiny-3
   nodeAffinity:
@@ -62,19 +62,19 @@ spec:
         - key: kubernetes.io/hostname
           operator: In
           values:
-          - trillian
+          - disasterarea
 ---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: trillian-small-1
+  name: disasterarea-small-1
 spec:
   capacity:
     storage: 10Gi
   accessModes:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage-trillian
+  storageClassName: local-storage-disasterarea
   local:
     path: /mnt/k8s-data/small-1
   nodeAffinity:
@@ -84,19 +84,19 @@ spec:
         - key: kubernetes.io/hostname
           operator: In
           values:
-          - trillian
+          - disasterarea
 ---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: trillian-small-2
+  name: disasterarea-small-2
 spec:
   capacity:
     storage: 10Gi
   accessModes:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage-trillian
+  storageClassName: local-storage-disasterarea
   local:
     path: /mnt/k8s-data/small-2
   nodeAffinity:
@@ -106,19 +106,19 @@ spec:
         - key: kubernetes.io/hostname
           operator: In
           values:
-          - trillian
+          - disasterarea
 ---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: trillian-medium-1
+  name: disasterarea-medium-1
 spec:
   capacity:
     storage: 20Gi
   accessModes:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage-trillian
+  storageClassName: local-storage-disasterarea
   local:
     path: /mnt/k8s-data/medium-1
   nodeAffinity:
@@ -128,19 +128,19 @@ spec:
         - key: kubernetes.io/hostname
           operator: In
           values:
-          - trillian
+          - disasterarea
 ---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: trillian-large-1
+  name: disasterarea-large-1
 spec:
   capacity:
     storage: 50Gi
   accessModes:
   - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage-trillian
+  storageClassName: local-storage-disasterarea
   local:
     path: /mnt/k8s-data/large-1
   nodeAffinity:
@@ -150,4 +150,4 @@ spec:
         - key: kubernetes.io/hostname
           operator: In
           values:
-          - trillian
+          - disasterarea

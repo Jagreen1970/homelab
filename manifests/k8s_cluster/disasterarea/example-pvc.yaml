@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: trillian-tiny-pvc
+  name: disasterarea-tiny-pvc
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: local-storage-trillian
+  storageClassName: local-storage-disasterarea
   resources:
     requests:
       storage: 5Gi
@@ -13,11 +13,11 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: trillian-small-pvc
+  name: disasterarea-small-pvc
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: local-storage-trillian
+  storageClassName: local-storage-disasterarea
   resources:
     requests:
       storage: 10Gi
@@ -25,11 +25,11 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: trillian-medium-pvc
+  name: disasterarea-medium-pvc
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: local-storage-trillian
+  storageClassName: local-storage-disasterarea
   resources:
     requests:
       storage: 20Gi
@@ -37,11 +37,11 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: trillian-large-pvc
+  name: disasterarea-large-pvc
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: local-storage-trillian
+  storageClassName: local-storage-disasterarea
   resources:
     requests:
       storage: 50Gi
