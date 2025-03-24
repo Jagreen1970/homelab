@@ -1,0 +1,30 @@
+---
+# test-nfs-storage.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-nfs-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: nfs-storage
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nfs-storage-test
+spec:
+  containers:
+  - name: nfs-storage-test
+    image: busybox
+    command: ["/bin/sh", "-c", "echo 'NFS storage test successful!' > /data/nfs-test.txt && sleep 3600"]
+    volumeMounts:
+    - name: nfs-test-volume
+      mountPath: /data
+  volumes:
+  - name: nfs-test-volume
+    persistentVolumeClaim:
+      claimName: test-nfs-pvc

@@ -85,10 +85,26 @@
         path: /etc/kubernetes/admin.conf
       register: admin_conf_stat
 
+    - name: Ensure homelab directory exists
+      ansible.builtin.file:
+        path: "/home/admin/homelab"
+        state: directory
+        owner: admin
+        group: admin
+        mode: '0755'
+      when: admin_conf_stat.stat.exists
+
+    - name: Ensure manifests directory structure exists
+      ansible.builtin.file:
+        path: "/home/admin/homelab/manifests/k8s_cluster/test"
+        state: directory
+        mode: '0755'
+      when: admin_conf_stat.stat.exists
+
     - name: Copy test manifests from repository
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../../manifests/k8s_cluster/test/{{ item }}"
-        dest: "/root/{{ item }}"
+        dest: "/home/admin/homelab/manifests/k8s_cluster/test/{{ item }}"
         mode: '0644'
         remote_src: false
       loop:
@@ -97,10 +113,11 @@
         - test-storage.yaml
         - test-storage-pod.yaml
         - test-storage-pvc.yaml
+        - test-nfs-storage.yaml
       when: admin_conf_stat.stat.exists
 
     - name: Apply network test resources
-      ansible.builtin.command: kubectl apply -f /root/test-network.yaml
+      ansible.builtin.command: kubectl apply -f /home/admin/homelab/manifests/k8s_cluster/test/test-network.yaml
       register: network_apply
       changed_when: true
       when: admin_conf_stat.stat.exists
@@ -118,8 +135,16 @@
     - name: Test Pod to Pod connectivity
       ansible.builtin.shell: |
         set -o pipefail
-        kubectl exec -it -n network-test network-test-1 -- curl -s network-test-2 |
-        grep -q "Welcome to nginx" && echo "Pod to Pod connectivity: SUCCESS" || echo "Pod to Pod connectivity: FAILED"
+        # First try with FQDN
+        kubectl exec -it -n network-test network-test-1 -- curl -s network-test-2.network-test.pod.cluster.local |
+        grep -q "Welcome to nginx" && echo "Pod to Pod connectivity via FQDN: SUCCESS" || echo "Pod to Pod connectivity via FQDN: FAILED"
+
+        # Fallback to IP if FQDN fails
+        if [ $? -ne 0 ]; then
+          POD2_IP=$(kubectl get pod -n network-test network-test-2 -o jsonpath='{.status.podIP}')
+          kubectl exec -it -n network-test network-test-1 -- curl -s $POD2_IP |
+          grep -q "Welcome to nginx" && echo "Pod to Pod connectivity via IP: SUCCESS" || echo "Pod to Pod connectivity via IP: FAILED"
+        fi
       register: pod_to_pod
       changed_when: false
       when: admin_conf_stat.stat.exists and network_wait.rc is defined and network_wait.rc == 0
@@ -150,7 +175,7 @@
       when: pod_to_service is defined and pod_to_service.stdout_lines is defined
 
     - name: Clean up network test resources
-      ansible.builtin.command: kubectl delete -f /root/test-network.yaml
+      ansible.builtin.command: kubectl delete -f /home/admin/homelab/manifests/k8s_cluster/test/test-network.yaml
       changed_when: true
       when: admin_conf_stat.stat.exists and network_apply is defined and network_apply.rc is defined and network_apply.rc == 0
       failed_when: false
@@ -175,7 +200,7 @@
       failed_when: false
 
     - name: Apply storage test resources
-      ansible.builtin.command: kubectl apply -f /root/test-storage.yaml
+      ansible.builtin.command: kubectl apply -f /home/admin/homelab/manifests/k8s_cluster/test/test-storage.yaml
       register: storage_apply
       changed_when: true
       when: admin_conf_stat.stat.exists and storage_class_exists.rc is defined and storage_class_exists.rc == 0
@@ -209,7 +234,7 @@
       when: storage_result is defined and storage_result.stdout_lines is defined
 
     - name: Clean up storage test resources
-      ansible.builtin.command: kubectl delete -f /root/test-storage.yaml
+      ansible.builtin.command: kubectl delete -f /home/admin/homelab/manifests/k8s_cluster/test/test-storage.yaml
       changed_when: true
       when: admin_conf_stat.stat.exists and storage_apply is defined and storage_apply.rc is defined and storage_apply.rc == 0
       failed_when: false
@@ -227,7 +252,7 @@
 # Using the copied test manifests from repository
 
     - name: Apply deployment test resources
-      ansible.builtin.command: kubectl apply -f /root/test-deployment.yaml
+      ansible.builtin.command: kubectl apply -f /home/admin/homelab/manifests/k8s_cluster/test/test-deployment.yaml
       register: deployment_apply
       changed_when: true
       when: admin_conf_stat.stat.exists
@@ -284,7 +309,7 @@
       when: service_access is defined and service_access.stdout_lines is defined
 
     - name: Clean up deployment test resources
-      ansible.builtin.command: kubectl delete -f /root/test-deployment.yaml
+      ansible.builtin.command: kubectl delete -f /home/admin/homelab/manifests/k8s_cluster/test/test-deployment.yaml
       changed_when: true
       when: admin_conf_stat.stat.exists and deployment_apply.rc is defined and deployment_apply.rc == 0
       failed_when: false
@@ -318,12 +343,12 @@
           {% endif %}
 
           For more details, check the full playbook output.
-        dest: /root/k8s-test-results.txt
+        dest: /home/admin/homelab/k8s-test-results.txt
         mode: '0644'
       when: admin_conf_stat.stat.exists
 
     - name: Display test results summary
-      ansible.builtin.command: cat /root/k8s-test-results.txt
+      ansible.builtin.command: cat /home/admin/homelab/k8s-test-results.txt
       register: test_summary
       changed_when: false
       when: admin_conf_stat.stat.exists
@@ -332,3 +357,129 @@
       ansible.builtin.debug:
         var: test_summary.stdout_lines
       when: test_summary is defined and test_summary.stdout_lines is defined
+
+- name: Run NFS storage tests
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if admin.conf exists
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+
+    - name: Check if NFS storage class exists
+      ansible.builtin.command: kubectl get storageclass nfs-storage
+      register: nfs_storage_class_exists
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Check if NFS provisioner is running
+      ansible.builtin.command: kubectl get pods -l app=nfs-client-provisioner
+      register: nfs_provisioner_check
+      changed_when: false
+      when: admin_conf_stat.stat.exists and nfs_storage_class_exists.rc is defined and nfs_storage_class_exists.rc == 0
+      failed_when: false
+
+    - name: Display NFS provisioner status
+      ansible.builtin.debug:
+        var: nfs_provisioner_check.stdout_lines
+      when: nfs_provisioner_check is defined and nfs_provisioner_check.stdout_lines is defined
+
+    - name: Apply NFS storage test resources
+      ansible.builtin.command: kubectl apply -f /home/admin/homelab/manifests/k8s_cluster/test/test-nfs-storage.yaml
+      register: nfs_storage_apply
+      changed_when: true
+      when: >
+        admin_conf_stat.stat.exists and
+        nfs_storage_class_exists.rc is defined and nfs_storage_class_exists.rc == 0 and
+        nfs_provisioner_check.rc is defined and nfs_provisioner_check.rc == 0 and
+        "Running" in nfs_provisioner_check.stdout
+
+    - name: Wait for NFS storage test pod to be ready
+      ansible.builtin.shell: |
+        kubectl wait --for=condition=ready pod/nfs-storage-test --timeout=30s || true
+      register: nfs_storage_wait
+      changed_when: false
+      when: >
+        admin_conf_stat.stat.exists and
+        nfs_storage_apply is defined and nfs_storage_apply.rc is defined and nfs_storage_apply.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Verify NFS storage test results
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pod nfs-storage-test -o wide | grep Running &&
+        kubectl exec -it nfs-storage-test -- cat /data/nfs-test.txt |
+        grep -q "NFS storage test successful" && echo "NFS Storage test: SUCCESS" || echo "NFS Storage test: FAILED"
+      register: nfs_storage_result
+      changed_when: false
+      when: >
+        admin_conf_stat.stat.exists and
+        nfs_storage_wait is defined and nfs_storage_wait.rc is defined and nfs_storage_wait.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Display NFS storage test results
+      ansible.builtin.debug:
+        var: nfs_storage_result.stdout_lines
+      when: nfs_storage_result is defined and nfs_storage_result.stdout_lines is defined
+
+    - name: Clean up NFS storage test resources
+      ansible.builtin.command: kubectl delete -f /home/admin/homelab/manifests/k8s_cluster/test/test-nfs-storage.yaml
+      changed_when: true
+      when: >
+        admin_conf_stat.stat.exists and
+        nfs_storage_apply is defined and nfs_storage_apply.rc is defined and nfs_storage_apply.rc == 0
+      failed_when: false
+
+    - name: Generate NFS storage test summary
+      ansible.builtin.copy:
+        content: |
+          Kubernetes NFS Storage Test Results
+          ==================================
+
+          Test run completed on: {{ ansible_date_time.date }} {{ ansible_date_time.time }}
+
+          NFS Storage Class: {{ "Available" if nfs_storage_class_exists.rc is defined and nfs_storage_class_exists.rc == 0 else "Not available" }}
+          NFS Provisioner: {{ "Running" if nfs_provisioner_check.stdout is defined and "Running" in nfs_provisioner_check.stdout else "Not running" }}
+
+          Test Results:
+          {% if nfs_storage_result is defined and nfs_storage_result.stdout_lines is defined %}
+          {{ nfs_storage_result.stdout_lines | join('\n') }}
+          {% else %}
+          NFS Storage test: NOT RUN
+          {% endif %}
+
+          Recommendations:
+          {% if nfs_storage_class_exists.rc is defined and nfs_storage_class_exists.rc != 0 %}
+          - NFS storage class not found - verify NFS storage deployment
+          {% elif nfs_provisioner_check.rc is defined and (nfs_provisioner_check.rc != 0 or "Running" not in nfs_provisioner_check.stdout) %}
+          - NFS provisioner not running - check pod logs and NFS server connectivity
+          {% elif nfs_storage_result is defined and "SUCCESS" not in nfs_storage_result.stdout %}
+          - NFS storage test failed - verify NFS server and exports configuration
+          - Check that the zaphod server is properly exporting /volume1/kubernetes
+          - Verify network connectivity and firewall rules
+          {% else %}
+          - NFS storage appears to be working correctly
+          - Consider using NFS storage for workloads that require ReadWriteMany access mode
+          - Remember that NFS performance may be slower than local storage for I/O intensive workloads
+          {% endif %}
+        dest: /home/admin/homelab/nfs-test-results.txt
+        mode: '0644'
+      when: admin_conf_stat.stat.exists and nfs_storage_class_exists.rc is defined
+
+    - name: Display NFS test results summary
+      ansible.builtin.command: cat /home/admin/homelab/nfs-test-results.txt
+      register: nfs_test_summary
+      changed_when: false
+      when: admin_conf_stat.stat.exists and nfs_storage_class_exists.rc is defined
+
+    - name: Display final NFS test summary
+      ansible.builtin.debug:
+        var: nfs_test_summary.stdout_lines
+      when: nfs_test_summary is defined and nfs_test_summary.stdout_lines is defined

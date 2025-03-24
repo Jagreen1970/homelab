@@ -54,13 +54,13 @@
         - trillian
         - disasterarea
 
-    - name: Set storage file list
+    - name: Set storage file list for local storage nodes
       ansible.builtin.set_fact:
-        storage_files:
+        local_storage_files:
           - "node-local-storage-setup.yaml"
           - "example-pvc.yaml"
 
-    - name: Copy storage manifests to control plane
+    - name: Copy local storage manifests to control plane
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../../manifests/k8s_cluster/{{ item.0 }}/{{ item.1 }}"
         dest: "/home/admin/manifests/k8s_cluster/{{ item.0 }}/{{ item.1 }}"
@@ -69,9 +69,37 @@
         mode: '0644'
       with_nested:
         - ['arthur', 'ford', 'trillian', 'disasterarea']
-        - "{{ storage_files }}"
+        - "{{ local_storage_files }}"
       loop_control:
         label: "{{ item.0 }}/{{ item.1 }}"
+
+    - name: Create zaphod directory for NFS storage
+      ansible.builtin.file:
+        path: "/home/admin/manifests/k8s_cluster/zaphod"
+        state: directory
+        owner: admin
+        group: admin
+        mode: '0755'
+
+    - name: Set NFS storage file list
+      ansible.builtin.set_fact:
+        nfs_storage_files:
+          - "nfs-provisioner-deployment.yaml"
+          - "nfs-provisioner-rbac.yaml"
+          - "nfs-storage-class.yaml"
+          - "example-pvc.yaml"
+          - "SYNOLOGY_NFS_SETUP.md"
+
+    - name: Copy NFS storage manifests to control plane
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../manifests/k8s_cluster/zaphod/{{ item }}"
+        dest: "/home/admin/manifests/k8s_cluster/zaphod/{{ item }}"
+        owner: admin
+        group: admin
+        mode: '0644'
+      loop: "{{ nfs_storage_files }}"
+      loop_control:
+        label: "zaphod/{{ item }}"
 
 - name: Deploy local storage classes and PVs
   hosts: "disasterarea"
@@ -119,6 +147,88 @@
       args:
         executable: /bin/bash
 
+- name: Deploy NFS storage provisioner
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if kubectl is available
+      ansible.builtin.command: kubectl version --client
+      register: kubectl_check
+      changed_when: false
+      failed_when: false
+
+    - name: Set up kubectl config
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+      when: kubectl_check.rc == 0
+
+    - name: Check if NFS service is accessible on zaphod
+      ansible.builtin.command: showmount -e zaphod
+      register: nfs_check
+      changed_when: false
+      failed_when: false
+      when: admin_conf_stat.stat.exists | default(false)
+
+    - name: Display NFS exports
+      ansible.builtin.debug:
+        var: nfs_check.stdout_lines
+      when: nfs_check.stdout_lines is defined
+
+    - name: Deploy NFS RBAC
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl apply -f /home/admin/manifests/k8s_cluster/zaphod/nfs-provisioner-rbac.yaml
+      register: nfs_rbac_result
+      changed_when: nfs_rbac_result.rc == 0
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        nfs_check.rc is defined and nfs_check.rc == 0
+      failed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Deploy NFS provisioner
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl apply -f /home/admin/manifests/k8s_cluster/zaphod/nfs-provisioner-deployment.yaml
+      register: nfs_provisioner_result
+      changed_when: nfs_provisioner_result.rc == 0
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        nfs_check.rc is defined and nfs_check.rc == 0 and
+        nfs_rbac_result.rc is defined and nfs_rbac_result.rc == 0
+      failed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Deploy NFS storage class
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl apply -f /home/admin/manifests/k8s_cluster/zaphod/nfs-storage-class.yaml
+      register: nfs_storage_class_result
+      changed_when: nfs_storage_class_result.rc == 0
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        nfs_check.rc is defined and nfs_check.rc == 0 and
+        nfs_provisioner_result.rc is defined and nfs_provisioner_result.rc == 0
+      failed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Wait for NFS provisioner to be ready
+      ansible.builtin.shell: |
+        kubectl wait --for=condition=ready pod -l app=nfs-client-provisioner --timeout=60s || true
+      register: nfs_wait_result
+      changed_when: false
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        nfs_storage_class_result.rc is defined and nfs_storage_class_result.rc == 0
+      failed_when: false
+      args:
+        executable: /bin/bash
+
 - name: Verify storage setup
   hosts: "disasterarea"
   become: true
@@ -145,7 +255,7 @@
       ansible.builtin.debug:
         var: pv_check.stdout_lines
       when: pv_check.stdout is defined
-      
+
     - name: Check for problematic PVs
       ansible.builtin.shell: |
         set -o pipefail
@@ -208,7 +318,7 @@
       failed_when: false
       args:
         executable: /bin/bash
-      
+
     - name: Run test storage pod
       ansible.builtin.shell: |
         set -o pipefail
@@ -218,7 +328,7 @@
       failed_when: false
       args:
         executable: /bin/bash
-      
+
     - name: Wait for test pod to be ready
       ansible.builtin.shell: |
         kubectl wait --for=condition=ready pod/storage-test --timeout=30s || true
@@ -227,7 +337,7 @@
       failed_when: false
       args:
         executable: /bin/bash
-      
+
     - name: Check test pod results
       ansible.builtin.shell: |
         set -o pipefail
@@ -237,12 +347,12 @@
       failed_when: false
       args:
         executable: /bin/bash
-      
+
     - name: Display test pod results
       ansible.builtin.debug:
         var: test_pod_result.stdout_lines
       when: test_pod_result.stdout_lines is defined
-      
+
     - name: Clean up test pod
       ansible.builtin.shell: |
         kubectl delete -f {{ playbook_dir }}/../../manifests/k8s_cluster/test/test-storage.yaml
@@ -251,7 +361,32 @@
       failed_when: false
       args:
         executable: /bin/bash
-      
+
+    - name: Check NFS storage class
+      ansible.builtin.command: kubectl get storageclass nfs-storage
+      register: nfs_class_check
+      changed_when: false
+      failed_when: false
+
+    - name: Check NFS provisioner pods
+      ansible.builtin.command: kubectl get pods -l app=nfs-client-provisioner
+      register: nfs_pod_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display NFS provisioner status
+      ansible.builtin.debug:
+        var: nfs_pod_check.stdout_lines
+      when: nfs_pod_check.stdout_lines is defined
+
+    - name: Ensure homelab directory exists
+      ansible.builtin.file:
+        path: "/home/admin/homelab"
+        state: directory
+        owner: admin
+        group: admin
+        mode: '0755'
+
     - name: Generate storage setup report
       ansible.builtin.copy:
         content: |
@@ -269,12 +404,23 @@
           Test Results:
           {{ test_pod_result.stdout if test_pod_result.stdout is defined else 'Test not run' }}
 
+          Local Storage Configuration:
           Storage directories have been created on all nodes in /mnt/k8s-data:
           - 3 tiny volumes (5Gi each)
           - 2 small volumes (10Gi each)
           - 1 medium volume (20Gi)
           - 1 large volume (50Gi)
-          
+
+          NFS Storage Configuration:
+          {% if nfs_class_check.rc is defined and nfs_class_check.rc == 0 %}
+          - NFS Storage Class: Successfully deployed
+          - NFS Provisioner: {{ "Running" if nfs_pod_check.stdout is defined and "Running" in nfs_pod_check.stdout else "Not running" }}
+          - NFS Server: zaphod
+          - NFS Path: /volume1/kubernetes
+          {% else %}
+          - NFS Storage: Not configured or failed to deploy
+          {% endif %}
+
           Issues Found:
           {% if problematic_pvs.stdout_lines is defined and problematic_pvs.stdout_lines | length > 0 %}
           - Problematic PVs: {{ problematic_pvs.stdout_lines | join(', ') }}
@@ -286,11 +432,20 @@
           {% else %}
           - No problematic PVCs found
           {% endif %}
-          
+          {% if nfs_class_check.rc is defined and nfs_class_check.rc != 0 %}
+          - NFS storage class not deployed or accessible
+          {% endif %}
+          {% if nfs_pod_check.rc is defined and nfs_pod_check.rc == 0 and "Running" not in nfs_pod_check.stdout %}
+          - NFS provisioner pod is not in Running state
+          {% endif %}
+
           Actions Taken:
-          - Created storage directories on all nodes
-          - Applied storage classes for all nodes
-          - Created persistent volumes for all nodes
+          - Created local storage directories on all nodes
+          - Applied local storage class for all nodes
+          - Created local persistent volumes for all nodes
+          {% if nfs_class_check.rc is defined and nfs_class_check.rc == 0 %}
+          - Deployed NFS storage provisioner and storage class
+          {% endif %}
           {% if problematic_pvcs.stdout_lines is defined and problematic_pvcs.stdout_lines | length > 0 %}
           - Deleted problematic PVCs
           {% endif %}
@@ -298,24 +453,32 @@
           - Recreated problematic PVs
           {% endif %}
           - Ran test pod to verify storage functionality
-          
+
           Recommendations:
           {% if test_pod_result.rc is defined and test_pod_result.rc != 0 %}
           - Storage test failed, consider checking kubelet logs on the nodes
           - Verify that the local-storage class is correctly configured
           - Check that all storage directories exist and have correct permissions
           {% else %}
-          - Storage appears to be functioning correctly
-          - Monitor storage usage and performance
+          - Local storage appears to be functioning correctly
           {% endif %}
-        dest: /root/storage-setup-report.txt
+          {% if nfs_class_check.rc is defined and nfs_class_check.rc != 0 %}
+          - Verify NFS server (zaphod) is accessible and exports are properly configured
+          - Check the NFS provisioner deployment logs for any issues
+          {% endif %}
+          {% if nfs_pod_check.rc is defined and nfs_pod_check.rc == 0 and "Running" not in nfs_pod_check.stdout %}
+          - Investigate why the NFS provisioner pod is not running
+          - Check pod logs with: kubectl logs -l app=nfs-client-provisioner
+          {% endif %}
+          - Monitor storage usage and performance
+        dest: /home/admin/homelab/storage-setup-report.txt
         mode: '0644'
-      
+
     - name: Display storage setup report
-      ansible.builtin.command: cat /root/storage-setup-report.txt
+      ansible.builtin.command: cat /home/admin/homelab/storage-setup-report.txt
       register: setup_report
       changed_when: false
-      
+
     - name: Show final setup report
       ansible.builtin.debug:
         var: setup_report.stdout_lines
