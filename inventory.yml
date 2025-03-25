@@ -9,3 +9,18 @@ homelab:
       ansible_host: ford
     trillian:
       ansible_host: trillian
+  children:
+    k8s_control_plane:
+      hosts:
+        disasterarea:
+    k8s_workers:
+      hosts:
+        arthur:
+        ford:
+        trillian:
+    docker_hosts:
+      hosts:
+        disasterarea:
+        arthur:
+        ford:
+        trillian:

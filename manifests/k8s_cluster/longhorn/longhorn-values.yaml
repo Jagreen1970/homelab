@@ -1,0 +1,75 @@
+# Longhorn Helm Chart Values
+# These configuration values will be used when installing Longhorn via Helm
+
+# Global default settings
+defaultSettings:
+  # Default replica count for volumes
+  defaultReplicaCount: 3
+  
+  # Create default disk on each node automatically
+  createDefaultDiskLabeledNodes: true
+  
+  # Default data path for Longhorn on each node
+  defaultDataPath: /mnt/k8s-data/longhorn-storage
+  
+  # Guaranteed engine CPU and memory
+  guaranteedEngineCPU: 0.25
+  guaranteedEngineManagerCPU: 0.2
+  
+  # Concurrent replica rebuilding limit
+  concurrentReplicaRebuildPerNodeLimit: 2
+  
+  # Backup settings (disabled by default)
+  backupTarget: ""
+  backupTargetCredentialSecret: ""
+  
+  # Storage network (use default)
+  storageNetwork: ""
+  
+  # Guaranteed engine/replica memory resource
+  guaranteedEngineManagerMemory: 128
+  guaranteedReplicaManagerMemory: 128
+
+persistence:
+  defaultClassReplicaCount: 3
+  
+# Resource requirements for Longhorn components
+resources:
+  # Longhorn Manager
+  manager:
+    limits:
+      cpu: 500m
+      memory: 500Mi
+    requests:
+      cpu: 100m
+      memory: 100Mi
+      
+  # Longhorn Driver
+  driver:
+    limits:
+      cpu: 300m
+      memory: 300Mi
+    requests:
+      cpu: 50m
+      memory: 50Mi
+      
+  # Longhorn UI
+  ui:
+    limits:
+      cpu: 200m
+      memory: 200Mi
+    requests:
+      cpu: 50m
+      memory: 50Mi
+
+# Enable CSI snapshotter
+csi:
+  attacherReplicaCount: 1
+  provisionerReplicaCount: 1
+  resizerReplicaCount: 1
+  snapshotterReplicaCount: 1
+
+# Longhorn service type (ClusterIP for internal access only)
+service:
+  ui:
+    type: ClusterIP
