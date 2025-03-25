@@ -16,3 +16,12 @@ worker_nodes:
 # Container runtime
 container_runtime: "containerd"
 cni_plugin: "flannel"
+
+# Logging configuration
+logging_namespace: "monitoring"
+logging_release_name: "logging-stack"
+logging_chart_version: "2.10.2"
+loki_storage_size: "10Gi"
+grafana_storage_size: "5Gi"
+grafana_node_port: 30000
+loki_retention_period: "672h"  # 28 days
