@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logging-test
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logging-test
+  template:
+    metadata:
+      labels:
+        app: logging-test
+    spec:
+      containers:
+      - name: logging-test
+        image: busybox
+        command:
+        - sh
+        - -c
+        - |
+          while true; do
+            echo "INFO: This is a test log message"
+            echo "WARNING: This is a warning message"
+            echo "ERROR: This is an error message"
+            sleep 5
+          done
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi 

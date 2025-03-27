@@ -119,6 +119,17 @@
       args:
         executable: /bin/bash
 
+    - name: Gather time information
+      ansible.builtin.shell: |
+        echo "  System time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+        echo "  Hardware time: $(hwclock --show)"
+        echo "  NTP status: $(systemctl is-active chronyd || systemctl is-active ntpd || echo "No NTP service found")"
+        echo "  Time zone: $(timedatectl show | grep Timezone | cut -d= -f2)"
+      register: time_info
+      changed_when: false
+      args:
+        executable: /bin/bash
+
     - name: Generate report for each host
       ansible.builtin.set_fact:
         host_report: |
@@ -131,6 +142,9 @@
           {{ (ansible_uptime_seconds | int % 86400) // 3600 }} hours, \
           {{ ((ansible_uptime_seconds | int % 86400) % 3600) // 60 }} minutes
           ==================================
+
+          Time Information:
+          {{ time_info.stdout_lines | join('\n') }}
 
           CPU:
           {{ cpu_info.stdout_lines | join('\n') }}
