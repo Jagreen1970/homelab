@@ -1,0 +1,23 @@
+---
+# Comprehensive Kubernetes setup including distributed storage
+# This playbook runs the following steps in sequence:
+# 1. Sets up base Kubernetes cluster (control plane and workers)
+# 2. Configures local storage
+# 3. Deploys Longhorn distributed storage
+# 4. Configures logging stack
+# 5. Runs tests to verify configuration
+
+- name: Import base Kubernetes setup
+  ansible.builtin.import_playbook: k8s.up.yml
+
+- name: Import storage setup
+  ansible.builtin.import_playbook: k8s.storage.yml
+
+- name: Import Longhorn distributed storage setup
+  ansible.builtin.import_playbook: k8s.longhorn.yml
+
+- name: Import logging stack setup
+  ansible.builtin.import_playbook: k8s.logging.yml
+
+- name: Import Kubernetes tests
+  ansible.builtin.import_playbook: k8s.test.yml

@@ -114,6 +114,7 @@
         - test-storage-pod.yaml
         - test-storage-pvc.yaml
         - test-nfs-storage.yaml
+        - test-longhorn-storage.yaml
       when: admin_conf_stat.stat.exists
 
     - name: Apply network test resources
@@ -314,50 +315,6 @@
       when: admin_conf_stat.stat.exists and deployment_apply.rc is defined and deployment_apply.rc == 0
       failed_when: false
 
-    - name: Generate test summary
-      ansible.builtin.copy:
-        content: |
-          Kubernetes Cluster Test Results
-          ===============================
-
-          Test run completed on: {{ ansible_date_time.date }} {{ ansible_date_time.time }}
-
-          Cluster Status: {{ 'HEALTHY' if (node_status is defined and 'NotReady' not in node_status.stdout) else 'ISSUES DETECTED' }}
-
-          Components:
-          - Nodes: {{ node_status.stdout_lines | length - 1 if node_status is defined else 'N/A' }} nodes
-          - API Server: {{ api_health.stdout if api_health is defined else 'N/A' }}
-
-          Tests:
-          - Network (Pod to Pod): {{ pod_to_pod.stdout if pod_to_pod is defined else 'SKIPPED' }}
-          - Network (Pod to Service): {{ pod_to_service.stdout if pod_to_service is defined else 'SKIPPED' }}
-          - Storage: {{ storage_result.stdout if storage_result is defined else 'SKIPPED' }}
-          - Workload: {{ service_access.stdout if service_access is defined else 'SKIPPED' }}
-
-          Recommendations:
-          {% if node_status is defined and 'NotReady' in node_status.stdout %}
-          - Check nodes that are in NotReady state
-          {% endif %}
-          {% if failed_pods is defined and 'No failed' not in failed_pods.stdout %}
-          - Investigate failed or pending pods
-          {% endif %}
-
-          For more details, check the full playbook output.
-        dest: /home/admin/homelab/k8s-test-results.txt
-        mode: '0644'
-      when: admin_conf_stat.stat.exists
-
-    - name: Display test results summary
-      ansible.builtin.command: cat /home/admin/homelab/k8s-test-results.txt
-      register: test_summary
-      changed_when: false
-      when: admin_conf_stat.stat.exists
-
-    - name: Display final test summary
-      ansible.builtin.debug:
-        var: test_summary.stdout_lines
-      when: test_summary is defined and test_summary.stdout_lines is defined
-
 - name: Run NFS storage tests
   hosts: "disasterarea"
   become: true
@@ -437,49 +394,228 @@
         nfs_storage_apply is defined and nfs_storage_apply.rc is defined and nfs_storage_apply.rc == 0
       failed_when: false
 
-    - name: Generate NFS storage test summary
+- name: Run Longhorn distributed storage tests
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if admin.conf exists
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+
+    - name: Check if Longhorn storage class exists
+      ansible.builtin.command: kubectl get storageclass longhorn-distributed
+      register: longhorn_storage_class_exists
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Check if Longhorn namespace exists
+      ansible.builtin.command: kubectl get namespace longhorn-system
+      register: longhorn_namespace_check
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Check if Longhorn is ready
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pods -n longhorn-system -l app=longhorn-ui | grep Running || echo "Longhorn UI not running"
+      register: longhorn_ui_check
+      changed_when: false
+      when: admin_conf_stat.stat.exists and longhorn_namespace_check.rc is defined and longhorn_namespace_check.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Display Longhorn status
+      ansible.builtin.debug:
+        var: longhorn_ui_check.stdout_lines
+      when: longhorn_ui_check is defined and longhorn_ui_check.stdout_lines is defined
+
+    - name: Apply Longhorn storage test resources
+      ansible.builtin.command: kubectl apply -f /home/admin/homelab/manifests/k8s_cluster/test/test-longhorn-storage.yaml
+      register: longhorn_storage_apply
+      changed_when: true
+      when: >
+        admin_conf_stat.stat.exists and
+        longhorn_storage_class_exists.rc is defined and longhorn_storage_class_exists.rc == 0 and
+        longhorn_ui_check.stdout is defined and "Longhorn UI not running" not in longhorn_ui_check.stdout
+
+    - name: Wait for Longhorn storage test pod to be ready
+      ansible.builtin.shell: |
+        kubectl wait --for=condition=ready pod/longhorn-storage-test --timeout=120s || true
+      register: longhorn_storage_wait
+      changed_when: false
+      when: >
+        admin_conf_stat.stat.exists and
+        longhorn_storage_apply is defined and longhorn_storage_apply.rc is defined and longhorn_storage_apply.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Verify Longhorn storage test results
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pod longhorn-storage-test -o wide | grep Running &&
+        kubectl exec -it longhorn-storage-test -- cat /data/longhorn-test.txt |
+        grep -q "Longhorn distributed storage test successful" && echo "Longhorn Storage test: SUCCESS" || echo "Longhorn Storage test: FAILED"
+      register: longhorn_storage_result
+      changed_when: false
+      when: >
+        admin_conf_stat.stat.exists and
+        longhorn_storage_wait is defined and longhorn_storage_wait.rc is defined and longhorn_storage_wait.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Display Longhorn storage test results
+      ansible.builtin.debug:
+        var: longhorn_storage_result.stdout_lines
+      when: longhorn_storage_result is defined and longhorn_storage_result.stdout_lines is defined
+
+    - name: Check Longhorn volume status
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl -n longhorn-system get volumes.longhorn.io || echo "Unable to get Longhorn volumes"
+      register: longhorn_volumes
+      changed_when: false
+      when: admin_conf_stat.stat.exists and longhorn_namespace_check.rc is defined and longhorn_namespace_check.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Display Longhorn volume status
+      ansible.builtin.debug:
+        var: longhorn_volumes.stdout_lines
+      when: longhorn_volumes is defined and longhorn_volumes.stdout_lines is defined
+
+    - name: Clean up Longhorn storage test resources
+      ansible.builtin.command: kubectl delete -f /home/admin/homelab/manifests/k8s_cluster/test/test-longhorn-storage.yaml
+      changed_when: true
+      when: >
+        admin_conf_stat.stat.exists and
+        longhorn_storage_apply is defined and longhorn_storage_apply.rc is defined and longhorn_storage_apply.rc == 0
+      failed_when: false
+
+    - name: Generate Longhorn storage test summary
       ansible.builtin.copy:
         content: |
-          Kubernetes NFS Storage Test Results
-          ==================================
+          Kubernetes Longhorn Distributed Storage Test Results
+          ================================================
 
           Test run completed on: {{ ansible_date_time.date }} {{ ansible_date_time.time }}
 
-          NFS Storage Class: {{ "Available" if nfs_storage_class_exists.rc is defined and nfs_storage_class_exists.rc == 0 else "Not available" }}
-          NFS Provisioner: {{ "Running" if nfs_provisioner_check.stdout is defined and "Running" in nfs_provisioner_check.stdout else "Not running" }}
+          Longhorn Storage Class: {{ "Available" if longhorn_storage_class_exists.rc is defined and longhorn_storage_class_exists.rc == 0 else "Not available" }}
+          Longhorn UI: {{ "Running" if longhorn_ui_check.stdout is defined and "Longhorn UI not running" not in longhorn_ui_check.stdout else "Not running" }}
 
           Test Results:
-          {% if nfs_storage_result is defined and nfs_storage_result.stdout_lines is defined %}
-          {{ nfs_storage_result.stdout_lines | join('\n') }}
+          {% if longhorn_storage_result is defined and longhorn_storage_result.stdout_lines is defined %}
+          {{ longhorn_storage_result.stdout_lines | join('\n') }}
           {% else %}
-          NFS Storage test: NOT RUN
+          Longhorn Storage test: NOT RUN
+          {% endif %}
+
+          Longhorn Volumes:
+          {% if longhorn_volumes is defined and longhorn_volumes.stdout_lines is defined and "Unable to get Longhorn volumes" not in longhorn_volumes.stdout %}
+          {{ longhorn_volumes.stdout_lines | join('\n') }}
+          {% else %}
+          Unable to get volume information
           {% endif %}
 
           Recommendations:
-          {% if nfs_storage_class_exists.rc is defined and nfs_storage_class_exists.rc != 0 %}
-          - NFS storage class not found - verify NFS storage deployment
-          {% elif nfs_provisioner_check.rc is defined and (nfs_provisioner_check.rc != 0 or "Running" not in nfs_provisioner_check.stdout) %}
-          - NFS provisioner not running - check pod logs and NFS server connectivity
-          {% elif nfs_storage_result is defined and "SUCCESS" not in nfs_storage_result.stdout %}
-          - NFS storage test failed - verify NFS server and exports configuration
-          - Check that the zaphod server is properly exporting /volume1/kubernetes
-          - Verify network connectivity and firewall rules
+          {% if longhorn_storage_class_exists.rc is defined and longhorn_storage_class_exists.rc != 0 %}
+          - Longhorn storage class not found - verify Longhorn deployment
+          {% elif longhorn_ui_check.stdout is defined and "Longhorn UI not running" in longhorn_ui_check.stdout %}
+          - Longhorn UI not running - check pod logs and ensure Longhorn is properly deployed
+          {% elif longhorn_storage_result is defined and "SUCCESS" not in longhorn_storage_result.stdout %}
+          - Longhorn storage test failed - verify Longhorn deployment and manager logs
+          - Check that iscsid is running on all worker nodes
+          - Verify Longhorn settings in the UI
           {% else %}
-          - NFS storage appears to be working correctly
-          - Consider using NFS storage for workloads that require ReadWriteMany access mode
-          - Remember that NFS performance may be slower than local storage for I/O intensive workloads
+          - Longhorn distributed storage appears to be working correctly
+          - Consider using Longhorn storage for workloads requiring high availability
+          - Remember that Longhorn performs best with at least 3 worker nodes for replica distribution
           {% endif %}
-        dest: /home/admin/homelab/nfs-test-results.txt
+        dest: /home/admin/homelab/longhorn-test-results.txt
         mode: '0644'
-      when: admin_conf_stat.stat.exists and nfs_storage_class_exists.rc is defined
+      when: admin_conf_stat.stat.exists and (longhorn_storage_class_exists.rc is defined or longhorn_namespace_check.rc is defined)
 
-    - name: Display NFS test results summary
-      ansible.builtin.command: cat /home/admin/homelab/nfs-test-results.txt
-      register: nfs_test_summary
+    - name: Display Longhorn test results summary
+      ansible.builtin.command: cat /home/admin/homelab/longhorn-test-results.txt
+      register: longhorn_test_summary
       changed_when: false
-      when: admin_conf_stat.stat.exists and nfs_storage_class_exists.rc is defined
+      when: admin_conf_stat.stat.exists and (longhorn_storage_class_exists.rc is defined or longhorn_namespace_check.rc is defined)
 
-    - name: Display final NFS test summary
+    - name: Display final Longhorn test summary
       ansible.builtin.debug:
-        var: nfs_test_summary.stdout_lines
-      when: nfs_test_summary is defined and nfs_test_summary.stdout_lines is defined
+        var: longhorn_test_summary.stdout_lines
+      when: longhorn_test_summary is defined and longhorn_test_summary.stdout_lines is defined
+
+- name: Generate combined test report
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if admin.conf exists
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+
+    - name: Generate test summary
+      ansible.builtin.copy:
+        content: |
+          Kubernetes Cluster Test Results
+          ===============================
+
+          Test run completed on: {{ ansible_date_time.date }} {{ ansible_date_time.time }}
+
+          Cluster Status: {{ 'HEALTHY' if (node_status is defined and node_status.stdout is defined and 'NotReady' not in node_status.stdout) else 'ISSUES DETECTED' }}
+
+          Components:
+          - Nodes: {{ node_status.stdout_lines | length - 1 if node_status is defined and node_status.stdout_lines is defined else 'N/A' }} nodes
+          - API Server: {{ api_health.stdout if api_health is defined and api_health.stdout is defined else 'N/A' }}
+
+          Tests:
+          - Network (Pod to Pod): {{ pod_to_pod.stdout if pod_to_pod is defined and pod_to_pod.stdout is defined else 'SKIPPED' }}
+          - Network (Pod to Service): {{ pod_to_service.stdout if pod_to_service is defined and pod_to_service.stdout is defined else 'SKIPPED' }}
+          - Local Storage: {{ storage_result.stdout if storage_result is defined and storage_result.stdout is defined else 'SKIPPED' }}
+          - NFS Storage: {{ nfs_storage_result.stdout if nfs_storage_result is defined and nfs_storage_result.stdout is defined else 'SKIPPED' }}
+          - Longhorn Storage: {{ longhorn_storage_result.stdout if longhorn_storage_result is defined and longhorn_storage_result.stdout is defined else 'SKIPPED' }}
+          - Workload: {{ service_access.stdout if service_access is defined and service_access.stdout is defined else 'SKIPPED' }}
+
+          Storage Systems Available:
+          - Local Storage: {{ 'AVAILABLE' if storage_class_exists is defined and storage_class_exists.rc is defined and storage_class_exists.rc == 0 else 'NOT AVAILABLE' }}
+          - NFS Storage: {{ 'AVAILABLE' if nfs_storage_class_exists is defined and nfs_storage_class_exists.rc is defined and nfs_storage_class_exists.rc == 0 else 'NOT AVAILABLE' }}
+          - Longhorn Storage: {{ 'AVAILABLE' if longhorn_storage_class_exists is defined and longhorn_storage_class_exists.rc is defined and longhorn_storage_class_exists.rc == 0 else 'NOT AVAILABLE' }}
+
+          Recommendations:
+          {% if node_status is defined and node_status.stdout is defined and 'NotReady' in node_status.stdout %}
+          - Check nodes that are in NotReady state
+          {% endif %}
+          {% if failed_pods is defined and failed_pods.stdout is defined and 'No failed' not in failed_pods.stdout %}
+          - Investigate failed or pending pods
+          {% endif %}
+          {% if longhorn_storage_class_exists is defined and longhorn_storage_class_exists.rc is defined and longhorn_storage_class_exists.rc != 0 and longhorn_namespace_check is defined and longhorn_namespace_check.rc is defined and longhorn_namespace_check.rc == 0 %}
+          - Longhorn is installed but storage class is missing - check Longhorn manager logs
+          {% endif %}
+
+          For more details, check the individual test reports:
+          - Basic cluster health: /home/admin/homelab/k8s-test-results.txt
+          - NFS storage: /home/admin/homelab/nfs-test-results.txt
+          - Longhorn storage: /home/admin/homelab/longhorn-test-results.txt
+        dest: /home/admin/homelab/kubernetes-test-report.txt
+        mode: '0644'
+      when: admin_conf_stat.stat.exists
+
+    - name: Display test results summary
+      ansible.builtin.command: cat /home/admin/homelab/kubernetes-test-report.txt
+      register: test_summary
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+
+    - name: Display final test summary
+      ansible.builtin.debug:
+        var: test_summary.stdout_lines
+      when: test_summary is defined and test_summary.stdout_lines is defined

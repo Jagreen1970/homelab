@@ -186,4 +186,35 @@ Common issues and solutions:
    - Adjust resource limits in the Longhorn values file
    - Consider using faster disks for Longhorn storage
 
+4. **Troubleshooting commands**
+   - Check Longhorn system components:
+     ```bash
+     kubectl -n longhorn-system get pods
+     ```
+   - Verify volume status:
+     ```bash
+     kubectl -n longhorn-system get volumes.longhorn.io
+     ```
+   - Check node status in Longhorn:
+     ```bash
+     kubectl -n longhorn-system get nodes.longhorn.io
+     ```
+
 For more troubleshooting information, refer to the [Longhorn documentation](https://longhorn.io/docs/1.4.1/troubleshooting/).
+
+## Deploying Longhorn
+
+To deploy Longhorn on your cluster, run:
+
+```bash
+ansible-playbook -i inventory.yml playbooks/kubernetes/k8s.longhorn.yml
+```
+
+This will:
+1. Install prerequisites on all worker nodes
+2. Set up storage directories
+3. Deploy Longhorn using Helm
+4. Configure the Longhorn storage class
+5. Run tests to verify the setup
+
+After successful installation, you can use Longhorn for all applications requiring highly available storage.
