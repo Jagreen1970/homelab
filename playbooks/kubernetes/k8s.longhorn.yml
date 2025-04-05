@@ -48,14 +48,17 @@
   become: true
   remote_user: admin
   tasks:
-    - name: Create Longhorn manifests directory on control plane
+    - name: Create Longhorn and test manifests directories on control plane
       ansible.builtin.file:
-        path: "/home/admin/manifests/k8s_cluster/longhorn"
+        path: "/home/admin/manifests/k8s_cluster/{{ item }}"
         state: directory
         owner: admin
         group: admin
         mode: '0755'
         recurse: true
+      loop:
+        - "longhorn"
+        - "test"
 
     - name: Set Longhorn file list
       ansible.builtin.set_fact:
@@ -65,6 +68,7 @@
           - "longhorn-storage-class.yaml"
           - "node-disk-preparation.yaml"
           - "example-pvc.yaml"
+          - "longhorn-ingress.yaml"
 
     - name: Copy Longhorn manifests to control plane
       ansible.builtin.copy:
@@ -208,6 +212,20 @@
       failed_when: false
       args:
         executable: /bin/bash
+        
+    - name: Deploy Longhorn ingress
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl apply -f /home/admin/manifests/k8s_cluster/longhorn/longhorn-ingress.yaml
+      register: ingress_result
+      changed_when: ingress_result.rc == 0
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        longhorn_status.rc is defined and longhorn_status.rc == 0 and
+        "longhorn-ui" in longhorn_status.stdout
+      failed_when: false
+      args:
+        executable: /bin/bash
 
 - name: Test Longhorn distributed storage
   hosts: "disasterarea"
@@ -307,6 +325,22 @@
       args:
         executable: /bin/bash
       failed_when: false
+      
+    - name: Check Longhorn Ingress status
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl -n longhorn-system get ingress longhorn-ingress || echo "Longhorn Ingress not found"
+      register: longhorn_ingress
+      changed_when: false
+      when: admin_conf_stat.stat.exists | default(false)
+      args:
+        executable: /bin/bash
+      failed_when: false
+      
+    - name: Display Longhorn Ingress status
+      ansible.builtin.debug:
+        var: longhorn_ingress.stdout_lines
+      when: longhorn_ingress.stdout_lines is defined
 
     - name: Display Longhorn volume status
       ansible.builtin.debug:
@@ -366,8 +400,10 @@
           Notes:
           - Longhorn provides highly available persistent storage with data replication
           - Use storageClassName: longhorn-distributed in PVCs to utilize Longhorn storage
-          - The Longhorn UI can be accessed via port-forwarding:
-            kubectl port-forward -n longhorn-system service/longhorn-frontend 8000:80
+          - The Longhorn UI can be accessed via:
+            1. Ingress: http://homelab.longhorn.local
+            2. Port-forwarding: kubectl port-forward -n longhorn-system service/longhorn-frontend 8000:80
+          - To access via hostname, add "homelab.longhorn.local" to your hosts file
 
           Troubleshooting:
           {% if test_pod_result.rc is defined and test_pod_result.rc != 0 %}

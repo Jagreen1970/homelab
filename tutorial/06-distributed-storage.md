@@ -152,13 +152,35 @@ volumes:
 
 ## Managing and Monitoring
 
-Longhorn provides a web UI for managing and monitoring your storage. To access it:
+Longhorn provides a web UI for managing and monitoring your storage. There are two ways to access it:
+
+### 1. Via Ingress (Recommended)
+
+We've configured an Ingress resource to make the Longhorn UI accessible via a hostname:
+
+```
+http://homelab.longhorn.local
+```
+
+To use this hostname, you'll need to add it to your hosts file (/etc/hosts on Linux/Mac, C:\Windows\System32\drivers\etc\hosts on Windows):
+
+```
+<CLUSTER_IP> homelab.longhorn.local
+```
+
+Replace `<CLUSTER_IP>` with the IP address of any node in your cluster.
+
+### 2. Via Port Forwarding
+
+Alternatively, you can use port forwarding to access the UI:
 
 ```bash
 kubectl port-forward -n longhorn-system service/longhorn-frontend 8000:80
 ```
 
 Then open http://localhost:8000 in your browser.
+
+### Using the Longhorn UI
 
 From the UI, you can:
 - Monitor volume health and replica status
