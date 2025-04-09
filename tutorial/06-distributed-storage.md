@@ -70,7 +70,7 @@ First, we need to prepare the worker nodes by installing required dependencies a
 
 ## Installing Longhorn
 
-We use Helm to deploy Longhorn on our Kubernetes cluster. Our playbook automates the following steps:
+We use Ansible Kubernetes modules to deploy Longhorn on our Kubernetes cluster. Our playbook automates the following steps:
 
 1. Add the Longhorn Helm repository
 2. Create a dedicated namespace for Longhorn
@@ -78,21 +78,27 @@ We use Helm to deploy Longhorn on our Kubernetes cluster. Our playbook automates
 4. Deploy a Longhorn storage class for persistent volumes
 
 ```yaml
-- name: Add Helm repository for Longhorn
-  ansible.builtin.shell: |
-    helm repo add longhorn https://charts.longhorn.io || true
-    helm repo update
+- name: Add Longhorn Helm repository
+  kubernetes.core.helm_repository:
+    name: longhorn
+    repo_url: https://charts.longhorn.io
+    state: present
 
 - name: Create Longhorn namespace
-  ansible.builtin.shell: |
-    kubectl apply -f /home/admin/manifests/k8s_cluster/longhorn/longhorn-namespace.yaml
+  kubernetes.core.k8s:
+    name: longhorn-system
+    api_version: v1
+    kind: Namespace
+    state: present
 
-- name: Deploy Longhorn using Helm
-  ansible.builtin.shell: |
-    helm upgrade --install longhorn longhorn/longhorn \
-      --namespace longhorn-system \
-      --version 1.4.1 \
-      --values /home/admin/manifests/k8s_cluster/longhorn/longhorn-values.yaml
+- name: Deploy Longhorn using Helm module
+  kubernetes.core.helm:
+    name: longhorn
+    chart_ref: longhorn/longhorn
+    release_namespace: longhorn-system
+    chart_version: 1.4.1
+    create_namespace: false
+    values: "{{ longhorn_values }}"
 ```
 
 The custom values file (`longhorn-values.yaml`) configures Longhorn with:
@@ -118,6 +124,14 @@ After installation, we verify that Longhorn is working correctly by:
     kubectl get pod longhorn-storage-test | grep Running && \
     kubectl exec -it longhorn-storage-test -- cat /data/longhorn-test.txt
 ```
+
+You can also check the status of your Longhorn installation using the provided status check script:
+
+```bash
+./manifests/k8s_cluster/longhorn/check-longhorn-status.sh
+```
+
+This script will verify all Longhorn components, check for the Ingress configuration, and provide access instructions.
 
 The test manifest creates:
 - A 1GB PVC using the `longhorn-distributed` storage class

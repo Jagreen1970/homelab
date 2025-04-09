@@ -1,0 +1,17 @@
+---
+# This playbook has been consolidated into k8s.longhorn.status.yml
+# Please use the new playbook for checking Longhorn status
+- name: Redirect to new Longhorn status playbook
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Notify about playbook consolidation
+      ansible.builtin.debug:
+        msg: |
+          This playbook has been consolidated into k8s.longhorn.status.yml
+          Please use the new playbook for checking Longhorn status:
+          
+          ansible-playbook -i inventory.yml playbooks/kubernetes/k8s.longhorn.status.yml
+          
+    - name: Exit playbook
+      ansible.builtin.meta: end_play

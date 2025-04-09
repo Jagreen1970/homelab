@@ -21,7 +21,8 @@ Before deploying Longhorn, ensure:
    - `open-iscsi` package installed and `iscsid` service running
    - At least 50GB of free disk space in `/mnt/k8s-data/longhorn-storage` 
    - Container runtime properly configured 
-3. Helm is installed on your control plane node
+3. The deployment playbook uses Ansible Kubernetes modules so no Helm installation is required
+4. The kubernetes Python module is installed automatically via pip during the k8s.up.yml playbook execution
 
 ## Configuration Files
 
@@ -54,8 +55,11 @@ This playbook will:
 Once deployed, you can verify Longhorn is working correctly:
 
 ```bash
-# Test Longhorn functionality
-ansible-playbook -i inventory.yml playbooks/kubernetes/k8s.test.yml
+# Run Longhorn status check playbook
+ansible-playbook -i inventory.yml playbooks/kubernetes/k8s.longhorn.status.yml
+
+# Or use the shell script for quick checks
+./manifests/k8s_cluster/longhorn/check-longhorn-status.sh
 
 # Check the storage class
 kubectl get storageclass longhorn-distributed
@@ -100,6 +104,27 @@ volumeMounts:
 ## Management and Monitoring
 
 ### Accessing the Longhorn UI
+
+There are two ways to access the Longhorn UI:
+
+#### 1. Via Ingress (Recommended)
+
+Access via the configured Ingress:
+
+```
+http://homelab.longhorn.local
+```
+
+Make sure to add this hostname to your hosts file:
+```
+<CLUSTER_IP> homelab.longhorn.local
+```
+
+Replace `<CLUSTER_IP>` with the IP address of any node in your cluster.
+
+#### 2. Via Port Forwarding
+
+Alternatively, you can use port forwarding:
 
 ```bash
 kubectl port-forward -n longhorn-system service/longhorn-frontend 8000:80

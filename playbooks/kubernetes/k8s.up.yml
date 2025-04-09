@@ -6,6 +6,16 @@
       ansible.builtin.include_vars:
         file: k8s_vars.yml
 
+- name: Install required Python modules on control machine
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Install Python Kubernetes module
+      ansible.builtin.pip:
+        name: kubernetes
+        state: present
+      become: false
+
 - name: Prepare hosts for Kubernetes
   hosts: all
   become: true
@@ -80,6 +90,7 @@
           - gnupg
           - lsb-release
           - python3-pip
+          - python3-kubernetes
         state: present
         update_cache: true
 
@@ -421,11 +432,3 @@
         msg: "Dashboard available at: https://{{ ansible_host }}:{{ dashboard_port.stdout | default('port-not-available') }}"
       when: dashboard_port is defined and dashboard_port.stdout is defined
       failed_when: false
-
-- name: Deploy logging stack
-  hosts: "{{ control_plane_node }}"
-  become: true
-  remote_user: admin
-  tasks:
-    - name: Include logging stack deployment
-      ansible.builtin.import_playbook: k8s.logging.yml

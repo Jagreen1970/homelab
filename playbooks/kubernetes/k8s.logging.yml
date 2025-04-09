@@ -27,13 +27,22 @@
         kind: Namespace
         state: present
 
-    - name: Deploy Loki stack using Helm
+    - name: Check if Loki stack is already deployed
+      kubernetes.core.k8s_info:
+        kind: StatefulSet
+        name: "{{ logging_release_name }}-loki"
+        namespace: "{{ logging_namespace }}"
+      register: loki_statefulset
+      failed_when: false
+
+    - name: Deploy or update Loki stack using Helm
       kubernetes.core.helm:
         name: "{{ logging_release_name }}"
         chart_ref: "{{ helm_repo_name }}/loki-stack"
         release_namespace: "{{ logging_namespace }}"
         chart_version: "{{ logging_chart_version }}"
         create_namespace: true
+        force: "{{ loki_statefulset.resources | length == 0 }}"
         values:
           loki:
             persistence:
@@ -64,8 +73,8 @@
             env:
               GF_SERVER_HTTP_PORT: 3000
               GF_SERVER_PROTOCOL: http
-              GF_SERVER_DOMAIN: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
-              GF_SERVER_ROOT_URL: "http://{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}:{{ grafana_node_port }}"
+              GF_SERVER_DOMAIN: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] | default('localhost') }}"
+              GF_SERVER_ROOT_URL: "http://{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] | default('localhost') }}:{{ grafana_node_port }}"
             datasources:
               datasources.yaml:
                 apiVersion: 1
@@ -76,6 +85,7 @@
                     url: http://{{ logging_release_name }}-loki:3100
                     version: 1
                     editable: false
+      failed_when: false
 
     - name: Wait for Loki deployment to be ready
       kubernetes.core.k8s_info:

@@ -44,3 +44,4 @@ Thumbs.db
 *.swo
 *.tmp
 *.bak
+.aider*

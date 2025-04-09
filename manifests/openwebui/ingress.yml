@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: open-webui-ingress
+  namespace: open-webui
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    cert-manager.io/cluster-issuer: "letsencrypt-prod" # Optional für TLS-Zertifikate
+spec:
+  tls:
+    - hosts:
+        - openwebui.stefan-strich.de
+      secretName: open-webui-tls
+  rules:
+    - host: openwebui.stefan-strich.de
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: open-webui-service
+                port:
+                  number: 80
+
