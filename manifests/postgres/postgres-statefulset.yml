@@ -49,11 +49,14 @@ spec:
                   fieldPath: metadata.name
             # Configure replication
             - name: POSTGRES_REPLICATION_MODE
-              value: "master"
-              # Use the POD_NAME environment variable to determine if this is the primary
-              # The first pod in the StatefulSet (postgres-0) will be the primary
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+                  # If POD_NAME is postgres-0, use master, otherwise slave
             - name: POSTGRES_REPLICATION_ROLE
-              value: "$(POD_NAME)"
+              value: "master"
+            - name: POSTGRES_REPLICATION_USER
+              value: "replicator"
           livenessProbe:
             exec:
               command:

@@ -5,14 +5,15 @@ metadata:
   namespace: postgres
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
-    cert-manager.io/cluster-issuer: "letsencrypt-prod" # Optional for TLS certificates
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod" # Commented out for initial testing
 spec:
-  tls:
-    - hosts:
-        - pgadmin.local
-      secretName: pgadmin-tls
+  # TLS section commented out for initial testing
+  # tls:
+  #   - hosts:
+  #       - pgadmin.local
+  #     secretName: pgadmin-tls
   rules:
-    - host: pgadmin.local
+    - host: pgadmin.example.com  # Update this to your actual domain
       http:
         paths:
           - path: /

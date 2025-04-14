@@ -110,3 +110,16 @@ Login credentials:
 - Check pod status: `kubectl get pods -n postgres`
 - View PostgreSQL logs: `kubectl logs -n postgres postgres-0`
 - View pgAdmin logs: `kubectl logs -n postgres deployment/pgadmin`
+- Check service endpoints: `kubectl get endpoints -n postgres`
+- Check events: `kubectl get events -n postgres`
+- Verify connectivity from test client:
+  ```bash
+  kubectl exec -it -n postgres postgres-client -- sh
+  # Inside the pod
+  ping pgadmin
+  curl -v http://pgadmin
+  ```
+- Check if pgAdmin volume has correct permissions:
+  ```bash
+  kubectl exec -it -n postgres $(kubectl get pod -n postgres -l app=pgadmin -o name) -- ls -la /var/lib/pgadmin
+  ```

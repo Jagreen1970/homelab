@@ -5,8 +5,10 @@
 # Create namespace
 kubectl apply -f namespace.yml
 
-# Deploy PostgreSQL
+# Create secrets first
 kubectl apply -f postgres-secrets.yml
+
+# Deploy PostgreSQL
 kubectl apply -f postgres-configmap.yml
 kubectl apply -f postgres-statefulset.yml
 kubectl apply -f postgres-services.yml

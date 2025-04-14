@@ -18,10 +18,10 @@ printf "\nChecking ingress..."
 kubectl get ingress -n postgres
 
 printf "\nTesting connection to PostgreSQL primary..."
-kubectl exec -n postgres postgres-client -- sh -c "PGPASSWORD=postgres-password psql -h postgres -U postgres -c 'SELECT version();'"
+kubectl exec -n postgres postgres-client -- sh -c "PGPASSWORD=\$(kubectl get secret -n postgres postgres-secrets -o jsonpath='{.data.postgres-password}' | base64 --decode) psql -h postgres -U postgres -c 'SELECT version();'"
 
 printf "\nTesting connection to PostgreSQL replica..."
-kubectl exec -n postgres postgres-client -- sh -c "PGPASSWORD=postgres-password psql -h postgres-read -U postgres -c 'SELECT version();'"
+kubectl exec -n postgres postgres-client -- sh -c "PGPASSWORD=\$(kubectl get secret -n postgres postgres-secrets -o jsonpath='{.data.postgres-password}' | base64 --decode) psql -h postgres-read -U postgres -c 'SELECT version();'"
 
 printf "\nVerifying pgAdmin is accessible..."
 PGADMIN_URL=$(kubectl get ingress -n postgres pgadmin-ingress -o jsonpath='{.spec.rules[0].host}')
