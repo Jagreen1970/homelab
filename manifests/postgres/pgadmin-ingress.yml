@@ -7,13 +7,14 @@ metadata:
     nginx.ingress.kubernetes.io/rewrite-target: /
     # cert-manager.io/cluster-issuer: "letsencrypt-prod" # Commented out for initial testing
 spec:
+  ingressClassName: nginx
   # TLS section commented out for initial testing
   # tls:
   #   - hosts:
   #       - pgadmin.local
   #     secretName: pgadmin-tls
   rules:
-    - host: pgadmin.example.com  # Update this to your actual domain
+    - host: pgadmin.local
       http:
         paths:
           - path: /

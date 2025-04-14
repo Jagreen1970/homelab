@@ -2,13 +2,17 @@
 # Comprehensive Kubernetes setup including distributed storage
 # This playbook runs the following steps in sequence:
 # 1. Sets up base Kubernetes cluster (control plane and workers)
-# 2. Configures local storage
-# 3. Deploys Longhorn distributed storage
-# 4. Configures logging stack
-# 5. Runs tests to verify configuration
+# 2. Configures MetalLB for LoadBalancer services
+# 3. Configures local storage
+# 4. Deploys Longhorn distributed storage
+# 5. Configures logging stack
+# 6. Runs tests to verify configuration
 
 - name: Import base Kubernetes setup
   ansible.builtin.import_playbook: k8s.up.yml
+
+- name: Import MetalLB setup
+  ansible.builtin.import_playbook: k8s.metallb.yml
 
 - name: Import storage setup
   ansible.builtin.import_playbook: k8s.storage.yml
