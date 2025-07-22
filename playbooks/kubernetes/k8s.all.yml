@@ -1,18 +1,26 @@
 ---
+# Include required variables
+- name: Include Kubernetes variables
+  ansible.builtin.include_vars:
+    file: k8s_vars.yml
 # Comprehensive Kubernetes setup including distributed storage
 # This playbook runs the following steps in sequence:
 # 1. Sets up base Kubernetes cluster (control plane and workers)
 # 2. Configures MetalLB for LoadBalancer services
-# 3. Configures local storage
-# 4. Deploys Longhorn distributed storage
-# 5. Configures logging stack
-# 6. Runs tests to verify configuration
+# 3. Configures cert-manager for TLS certificate management
+# 4. Configures local storage
+# 5. Deploys Longhorn distributed storage
+# 6. Configures logging stack
+# 7. Runs tests to verify configuration
 
 - name: Import base Kubernetes setup
   ansible.builtin.import_playbook: k8s.up.yml
 
 - name: Import MetalLB setup
   ansible.builtin.import_playbook: k8s.metallb.yml
+
+- name: Import cert-manager setup
+  ansible.builtin.import_playbook: k8s.cert-manager.yml
 
 - name: Import storage setup
   ansible.builtin.import_playbook: k8s.storage.yml

@@ -5,14 +5,10 @@ metadata:
   namespace: open-webui
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
-    cert-manager.io/cluster-issuer: "letsencrypt-prod" # Optional für TLS-Zertifikate
 spec:
-  tls:
-    - hosts:
-        - openwebui.stefan-strich.de
-      secretName: open-webui-tls
+  ingressClassName: nginx
   rules:
-    - host: openwebui.stefan-strich.de
+    - host: open-webui.local
       http:
         paths:
           - path: /
@@ -22,4 +18,3 @@ spec:
                 name: open-webui-service
                 port:
                   number: 80
-

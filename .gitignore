@@ -45,3 +45,7 @@ Thumbs.db
 *.tmp
 *.bak
 .aider*
+
+# files that are downloaded
+argocd-install.yaml
+

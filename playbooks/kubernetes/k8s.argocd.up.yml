@@ -1,0 +1,30 @@
+---
+- name: Load Kubernetes Variables
+  hosts: localhost
+  tasks:
+    - name: Include Kubernetes variables
+      ansible.builtin.include_vars:
+        file: k8s_vars.yml
+
+- name: Deploy ArgoCD
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Create namespace
+      kubernetes.core.k8s:
+        name: argocd
+        kind: Namespace
+        api_version: v1
+        state: present
+  
+    - name: Download the ArgoCD installation manifest
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+        dest: ../../manifests/argocd/argocd-install.yaml
+        mode: '0644'
+
+    - name: Install the ArgoCD installation manifest
+      kubernetes.core.k8s:
+        state: present
+        src: ../../manifests/argocd/argocd-install.yaml
+
