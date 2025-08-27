@@ -228,12 +228,12 @@ Longhorn provides a web UI for management that can be accessed in two ways:
 If your cluster has an ingress controller, you can access the UI using a hostname:
 
 ```
-http://homelab.longhorn.local
+http://longhorn.home
 ```
 
 To use this hostname, add an entry to your hosts file:
 ```
-<CLUSTER_IP> homelab.longhorn.local
+<CLUSTER_IP> longhorn.home
 ```
 
 Replace `<CLUSTER_IP>` with any node IP in your cluster.
@@ -320,7 +320,7 @@ kubectl get services -n longhorn-system
 
    a. Using Ingress (recommended):
    ```
-   http://homelab.longhorn.local
+   http://longhorn.home
    ```
    (Make sure to add this hostname to your hosts file)
    

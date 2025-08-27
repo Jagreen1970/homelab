@@ -112,12 +112,12 @@ There are two ways to access the Longhorn UI:
 Access via the configured Ingress:
 
 ```
-http://homelab.longhorn.local
+http://longhorn.home
 ```
 
 Make sure to add this hostname to your hosts file:
 ```
-<CLUSTER_IP> homelab.longhorn.local
+<CLUSTER_IP> longhorn.home
 ```
 
 Replace `<CLUSTER_IP>` with the IP address of any node in your cluster.

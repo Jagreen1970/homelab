@@ -27,4 +27,37 @@
       kubernetes.core.k8s:
         state: present
         src: ../../manifests/argocd/argocd-install.yaml
+        namespace: argocd
+
+    - name: Apply ArgoCD ingress configuration for HTTPS
+      kubernetes.core.k8s:
+        state: present
+        src: ../../manifests/argocd/ingress-https.yaml
+        namespace: argocd
+
+    - name: Apply ArgoCD ingress configuration for gRPC
+      kubernetes.core.k8s:
+        state: present
+        src: ../../manifests/argocd/ingress-grpc.yaml
+        namespace: argocd
+
+    - name: Apply configmap for ArgoCD server
+      kubernetes.core.k8s:
+        state: present
+        src: ../../manifests/argocd/argocd-cmd-params-cm.yaml
+        namespace: argocd
+
+    - name: Restart the ArgoCD server deployment for the parameters to take effect
+      kubernetes.core.k8s:
+        state: present
+        namespace: argocd
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: "argocd-server"
+            namespace: "argocd"
+            annotations:
+              kubectl.kubernetes.io/restartedAt: "{{ ansible_date_time.iso8601 }}"
+
 
