@@ -151,30 +151,30 @@ preEntrypointScript: |
   # Initialize Podman configuration for rootless mode
   mkdir -p /home/gitlab-runner/.config/containers
   mkdir -p /home/gitlab-runner/.local/share/containers
-  
+
   # Create containers.conf for optimal Podman settings
   cat > /home/gitlab-runner/.config/containers/containers.conf << 'EOF'
   [containers]
   log_driver = "journald"
-  
+
   [engine]
   cgroup_manager = "systemd"
   events_logger = "journald"
   runtime = "crun"
-  
+
   [network]
   network_backend = "netavark"
-  
+
   [storage]
   driver = "overlay"
   runroot = "/tmp/podman"
   graphroot = "/var/lib/containers"
   EOF
-  
+
   # Create writable runtime directory
   mkdir -p /tmp/podman
   chmod 755 /tmp/podman
-  
+
   echo "Podman configuration initialized"
 
 ## Specify whether the runner should start the session server.
@@ -485,7 +485,7 @@ runners:
     [[runners]]
       [runners.kubernetes]
         # Use GitLab Runner helper image for compatibility
-        image = "alpine:latest"
+        image = "debian:bullseye-slim"
         namespace = "{{ default .Release.Namespace .Values.runners.jobNamespace }}"
         privileged = true
         pull_policy = "if-not-present"
@@ -867,41 +867,41 @@ extraObjects:
     kind: ConfigMap
     metadata:
       name: gitlab-runner-cleanup-script
-      namespace: '{{ .Release.Namespace }}'
+      namespace: "{{ .Release.Namespace }}"
     data:
       cleanup.sh: |
         #!/bin/bash
         set -euo pipefail
-        
+
         echo "Starting cleanup process..."
-        
+
         # Clean up Podman images older than 7 days
         if command -v podman &> /dev/null; then
           echo "Cleaning up Podman images older than 7 days..."
           podman system prune -f --filter until=168h || true
           podman image prune -f --filter until=168h || true
         fi
-        
+
         # Clean up build artifacts older than 14 days
         find /builds -type f -mtime +14 -delete 2>/dev/null || true
         find /builds -type d -empty -delete 2>/dev/null || true
-        
+
         # Clean up cache older than 3 days
         find /cache -type f -mtime +3 -delete 2>/dev/null || true
-        
+
         # Report disk usage
         echo "Disk usage after cleanup:"
         df -h /builds /var/lib/containers || true
-        
+
         echo "Cleanup completed successfully"
-        
+
   - apiVersion: batch/v1
     kind: CronJob
     metadata:
       name: gitlab-runner-cleanup
-      namespace: '{{ .Release.Namespace }}'
+      namespace: "{{ .Release.Namespace }}"
     spec:
-      schedule: "0 2 * * *"  # Daily at 2 AM
+      schedule: "0 2 * * *" # Daily at 2 AM
       concurrencyPolicy: Forbid
       successfulJobsHistoryLimit: 3
       failedJobsHistoryLimit: 3
@@ -912,34 +912,34 @@ extraObjects:
               restartPolicy: OnFailure
               serviceAccountName: gitlab-runner
               containers:
-              - name: cleanup
-                image: quay.io/podman/stable:latest
-                command: ["/bin/bash", "/scripts/cleanup.sh"]
-                volumeMounts:
-                - name: cleanup-script
-                  mountPath: /scripts
-                - name: builds
-                  mountPath: /builds
-                - name: containers
-                  mountPath: /var/lib/containers
-                resources:
-                  limits:
-                    memory: 1Gi
-                    cpu: 500m
-                  requests:
-                    memory: 256Mi
-                    cpu: 100m
+                - name: cleanup
+                  image: quay.io/podman/stable:latest
+                  command: ["/bin/bash", "/scripts/cleanup.sh"]
+                  volumeMounts:
+                    - name: cleanup-script
+                      mountPath: /scripts
+                    - name: builds
+                      mountPath: /builds
+                    - name: containers
+                      mountPath: /var/lib/containers
+                  resources:
+                    limits:
+                      memory: 1Gi
+                      cpu: 500m
+                    requests:
+                      memory: 256Mi
+                      cpu: 100m
               volumes:
-              - name: cleanup-script
-                configMap:
-                  name: gitlab-runner-cleanup-script
-                  defaultMode: 0755
-              - name: builds
-                persistentVolumeClaim:
-                  claimName: builds
-              - name: containers
-                persistentVolumeClaim:
-                  claimName: containers
+                - name: cleanup-script
+                  configMap:
+                    name: gitlab-runner-cleanup-script
+                    defaultMode: 0755
+                - name: builds
+                  persistentVolumeClaim:
+                    claimName: builds
+                - name: containers
+                  persistentVolumeClaim:
+                    claimName: containers
 
 ## Add additional containers to the Pod, e.g. to run as sidecars.
 ##
