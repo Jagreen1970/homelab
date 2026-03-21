@@ -2,13 +2,13 @@
 homelab:
   hosts:
     disasterarea:
-      ansible_host: disasterarea
+      ansible_host: disasterarea.lab
     arthur:
-      ansible_host: arthur
+      ansible_host: arthur.lab
     ford:
-      ansible_host: ford
+      ansible_host: ford.lab
     trillian:
-      ansible_host: trillian
+      ansible_host: trillian.lab
   children:
     k8s_control_plane:
       hosts:

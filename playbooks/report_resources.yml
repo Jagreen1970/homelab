@@ -226,8 +226,7 @@
           STORAGE HOSTS: {{ groups.get('storage_hosts', []) | length }}
 
           TOTAL COMPUTE CAPACITY:
-            CPU Cores: {{ play_hosts | map('extract', hostvars, ['ansible_processor_count']) | map('int') | sum *
-                       play_hosts | map('extract', hostvars, ['ansible_processor_cores']) | map('int') | sum }}
+            CPU Cores: {{ play_hosts | map('extract', hostvars, ['ansible_processor_vcpus']) | map('int') | sum }}
             RAM: {{ (play_hosts | map('extract', hostvars, ['ansible_memtotal_mb']) | map('int') | sum / 1024) | round(1) }}GB
             Disk: {{ (play_hosts | map('extract', hostvars, ['ansible_mounts']) | flatten |
                    selectattr('device', 'match', '^/dev/') |

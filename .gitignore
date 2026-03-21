@@ -49,3 +49,6 @@ Thumbs.db
 # files that are downloaded
 argocd-install.yaml
 
+/prompts
+/CLAUDE.md
+/CLAUDE.md

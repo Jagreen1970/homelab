@@ -1,27 +1,27 @@
 ==================================
-Host: arthur (192.168.178.93)
+Host: arthur (192.168.1.24)
 OS: Ubuntu 24.04
-Kernel: 6.8.0-60-generic
-Last boot: 2025-08-27 18:54:49
-Uptime: 37 days, \
-14 hours, \
+Kernel: 6.8.0-106-generic
+Last boot: 2026-03-21 18:17:13
+Uptime: 0 days, \
+6 hours, \
 46 minutes
 ==================================
 
 Time Information:
-  System time: 2025-08-27 18:54:57 UTC\n  Hardware time: \n  NTP status: inactive\ninactive\nNo NTP service found\n  Time zone: Etc/UTC
+  System time: 2026-03-21 18:17:18 CET\n  Hardware time: \n  NTP status: inactive\ninactive\nNo NTP service found\n  Time zone: Europe/Berlin
 
 CPU:
-  Count: 4\n  Model: Intel(R) N100\n  Frequency: 2899.960\n  Load averages:  0.45, 1.03, 0.86
+  Count: 4\n  Model: Intel(R) N100\n  Frequency: 2899.939\n  Load averages:  0.30, 0.28, 0.17
 
 Memory:
-  Total: 15Gi Used: 1.9Gi Free: 4.1Gi Available: 13Gi
+  Total: 15Gi Used: 706Mi Free: 13Gi Available: 14Gi
 
 Disk:
-  /dev/sda2 mounted on /: 468G total, 388G available (13% used)\n  /dev/longhorn/pvc-ca27750a-91a6-4b5b-a0ff-2e0baf11939c mounted on /var/lib/kubelet/pods/05c5c1ae-dfb1-488c-a662-0a6501abe348/volumes/kubernetes.io~csi/pvc-ca27750a-91a6-4b5b-a0ff-2e0baf11939c/mount: 9.8G total, 9.7G available (1% used)
+  /dev/sda2 mounted on /: 468G total, 418G available (6% used)
 
 Network:
-  enp1s0: 192.168.178.93/24\n  wlp2s0: 192.168.178.43/24\n  docker0: 172.17.0.1/16\n  flannel.1: 10.244.1.0/32\n  cni0: 10.244.1.1/24
+  enp1s0: 192.168.1.24/24\n  wlp2s0: 192.168.1.165/24\n  docker0: 172.17.0.1/16
 
 Docker:
   Containers running: 0\n  Images: 0\n  Docker Disk Usage:     Images: 0 of 0\n    Containers: 0 of 0
@@ -36,68 +36,68 @@ System Temperature:
 =====================================================================
 
 ==================================
-Host: disasterarea (192.168.178.42)
+Host: disasterarea (192.168.1.166)
 OS: Ubuntu 24.04
-Kernel: 6.8.0-60-generic
-Last boot: 2025-08-27 18:54:49
-Uptime: 37 days, \
-14 hours, \
+Kernel: 6.8.0-106-generic
+Last boot: 2026-03-21 18:17:13
+Uptime: 0 days, \
+6 hours, \
 46 minutes
 ==================================
 
 Time Information:
-  System time: 2025-08-27 18:54:57 UTC\n  Hardware time: \n  NTP status: inactive\ninactive\nNo NTP service found\n  Time zone: Etc/UTC
+  System time: 2026-03-21 18:17:18 CET\n  Hardware time: \n  NTP status: inactive\ninactive\nNo NTP service found\n  Time zone: Europe/Berlin
 
 CPU:
-  Count: 4\n  Model: Intel(R) N100\n  Frequency: 3007.313\n  Load averages:  0.50, 0.60, 0.47
+  Count: 4\n  Model: Intel(R) N100\n  Frequency: 2899.828\n  Load averages:  0.13, 0.17, 0.12
 
 Memory:
-  Total: 15Gi Used: 1.9Gi Free: 8.3Gi Available: 13Gi
+  Total: 15Gi Used: 616Mi Free: 13Gi Available: 14Gi
 
 Disk:
-  /dev/sda2 mounted on /: 468G total, 430G available (4% used)
+  /dev/mapper/ubuntu--vg-ubuntu--lv mounted on /: 98G total, 86G available (9% used)
 
 Network:
-  enp1s0: 192.168.178.42/24\n  wlp2s0: 192.168.178.41/24\n  docker0: 172.17.0.1/16\n  flannel.1: 10.244.0.0/32\n  cni0: 10.244.0.1/24
+  enp1s0: 192.168.1.166/24
 
 Docker:
-  Containers running: 0\n  Images: 0\n  Docker Disk Usage:     Images: 0 of 0\n    Containers: 0 of 0
+  Docker not installed
 
 Kubernetes:
-  Kubernetes version: \n  Node role: Kubernetes control plane
+  Kubernetes not installed
 Kubernetes Resources:
-  Pods: 95\n  Deployments: 30\n  PVs: 37\n  PVCs: 9\nWORKER_NODES:\narthur\nford\ntrillian
+  No Kubernetes cluster access
 
 System Temperature:
-  Temperature: 57°C
+  Temperature: 53°C
 
 
 =====================================================================
 
 ==================================
-Host: ford (192.168.178.22)
+Host: ford (192.168.1.76)
 OS: Ubuntu 24.04
-Kernel: 6.8.0-60-generic
-Last boot: 2025-08-27 18:54:50
-Uptime: 37 days, \
-14 hours, \
+Kernel: 6.8.0-106-generic
+Last boot: 2026-03-21 18:17:13
+Uptime: 0 days, \
+6 hours, \
 46 minutes
 ==================================
 
 Time Information:
-  System time: 2025-08-27 18:54:57 UTC\n  Hardware time: \n  NTP status: inactive\ninactive\nNo NTP service found\n  Time zone: Etc/UTC
+  System time: 2026-03-21 18:17:19 CET\n  Hardware time: \n  NTP status: inactive\ninactive\nNo NTP service found\n  Time zone: Europe/Berlin
 
 CPU:
-  Count: 4\n  Model: Intel(R) Celeron(R) N5105 @ 2.00GHz\n  Frequency: 2799.948\n  Load averages:  0.50, 0.99, 0.89
+  Count: 4\n  Model: Intel(R) Celeron(R) N5105 @ 2.00GHz\n  Frequency: 2800.038\n  Load averages:  0.16, 0.15, 0.05
 
 Memory:
-  Total: 15Gi Used: 2.3Gi Free: 4.5Gi Available: 13Gi
+  Total: 15Gi Used: 699Mi Free: 13Gi Available: 14Gi
 
 Disk:
-  /dev/sda2 mounted on /: 468G total, 386G available (14% used)\n  /dev/longhorn/pvc-76516a7b-cd51-47bd-bf30-e43ead841559 mounted on /var/lib/kubelet/pods/11caebd2-6fe2-4c57-b358-e5bf566c8911/volumes/kubernetes.io~csi/pvc-76516a7b-cd51-47bd-bf30-e43ead841559/mount: 9.8G total, 9.7G available (1% used)\n  /dev/longhorn/pvc-8c60e790-0431-42dd-aacd-aa00aa300728 mounted on /var/lib/kubelet/pods/d2694504-62cf-4790-a504-8a127ea08488/volumes/kubernetes.io~csi/pvc-8c60e790-0431-42dd-aacd-aa00aa300728/mount: 974M total, 958M available (1% used)\n  /dev/longhorn/pvc-dffec847-576b-4f82-b625-b4a88008827e mounted on /var/lib/kubelet/pods/8e8c4845-07d2-41d2-9a6a-1f10d0478488/volumes/kubernetes.io~csi/pvc-dffec847-576b-4f82-b625-b4a88008827e/mount: 49G total, 49G available (1% used)
+  /dev/sda2 mounted on /: 468G total, 415G available (7% used)
 
 Network:
-  enp1s0: 192.168.178.22/24\n  wlp2s0: 192.168.178.23/24\n  docker0: 172.17.0.1/16\n  flannel.1: 10.244.2.0/32\n  cni0: 10.244.2.1/24
+  enp1s0: 192.168.1.76/24\n  wlp2s0: 192.168.1.94/24\n  docker0: 172.17.0.1/16
 
 Docker:
   Containers running: 0\n  Images: 0\n  Docker Disk Usage:     Images: 0 of 0\n    Containers: 0 of 0
@@ -112,29 +112,29 @@ System Temperature:
 =====================================================================
 
 ==================================
-Host: trillian (192.168.178.27)
+Host: trillian (192.168.1.67)
 OS: Ubuntu 24.04
-Kernel: 6.8.0-60-generic
-Last boot: 2025-08-27 18:54:50
-Uptime: 37 days, \
-14 hours, \
+Kernel: 6.8.0-106-generic
+Last boot: 2026-03-21 18:17:13
+Uptime: 0 days, \
+6 hours, \
 46 minutes
 ==================================
 
 Time Information:
-  System time: 2025-08-27 18:54:57 UTC\n  Hardware time: \n  NTP status: inactive\ninactive\nNo NTP service found\n  Time zone: Etc/UTC
+  System time: 2026-03-21 18:17:19 CET\n  Hardware time: \n  NTP status: inactive\ninactive\nNo NTP service found\n  Time zone: Europe/Berlin
 
 CPU:
-  Count: 4\n  Model: Intel(R) Celeron(R) N5105 @ 2.00GHz\n  Frequency: 2800.000\n  Load averages:  0.37, 0.42, 0.27
+  Count: 4\n  Model: Intel(R) Celeron(R) N5105 @ 2.00GHz\n  Frequency: 2800.000\n  Load averages:  0.21, 0.14, 0.06
 
 Memory:
-  Total: 11Gi Used: 2.0Gi Free: 1.7Gi Available: 9.5Gi
+  Total: 11Gi Used: 679Mi Free: 9.8Gi Available: 10Gi
 
 Disk:
-  /dev/sda2 mounted on /: 233G total, 166G available (25% used)\n  /dev/longhorn/pvc-092a7c5e-1df5-4897-85c9-378a03962404 mounted on /var/lib/kubelet/pods/06270580-973d-47a5-8bb0-90591c667723/volumes/kubernetes.io~csi/pvc-092a7c5e-1df5-4897-85c9-378a03962404/mount: 9.8G total, 9.7G available (1% used)\n  /dev/longhorn/pvc-91b36688-46be-4896-b00d-b5aaa4d2da43 mounted on /var/lib/kubelet/pods/15d09da6-da31-41f9-ba21-42c0c53a23bb/volumes/kubernetes.io~csi/pvc-91b36688-46be-4896-b00d-b5aaa4d2da43/mount: 974M total, 958M available (1% used)
+  /dev/sda2 mounted on /: 233G total, 195G available (12% used)
 
 Network:
-  enp1s0: 192.168.178.27/24\n  wlp2s0: 192.168.178.28/24\n  docker0: 172.17.0.1/16\n  flannel.1: 10.244.3.0/32\n  cni0: 10.244.3.1/24
+  enp1s0: 192.168.1.67/24\n  wlp2s0: 192.168.1.145/24\n  docker0: 172.17.0.1/16
 
 Docker:
   Containers running: 0\n  Images: 0\n  Docker Disk Usage:     Images: 0 of 0\n    Containers: 0 of 0
