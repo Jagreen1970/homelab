@@ -15,7 +15,7 @@ This tutorial documents the process of setting up and managing a homelab environ
    - [Step 5: Testing Kubernetes Cluster](05-testing-kubernetes-cluster.md)
    - [Step 6: Distributed Storage with Longhorn](06-distributed-storage.md)
    - [Step 7: Application Deployment](07-application-deployment.md) (Coming soon)
-   - [Step 8: Network Configuration](08-network-configuration.md) (Coming soon)
+   - [Step 8: Network Configuration](08-network-configuration.md)
    - [Step 9: Security Hardening](09-security-hardening.md)
    - [Step 10: Package Management](10-package-management.md) (Coming soon)
 5. [Progress Tracking](#progress-tracking)

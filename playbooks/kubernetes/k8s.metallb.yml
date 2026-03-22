@@ -31,20 +31,26 @@
         src: "{{ playbook_dir }}/../../manifests/k8s_cluster/metallb/metallb-config.yaml"
       register: config_result
 
+    - name: Check if ingress-nginx namespace exists
+      ansible.builtin.command: kubectl get namespace ingress-nginx
+      register: ingress_ns
+      changed_when: false
+      failed_when: false
+
     - name: Verify LoadBalancer service gets an IP
       ansible.builtin.shell: |
         kubectl patch svc ingress-nginx-controller -n ingress-nginx -p '{"spec":{"type":"LoadBalancer"}}'
-        sleep 10  # Give MetalLB time to assign an IP
+        sleep 10
         kubectl get svc ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
       register: lb_ip
       changed_when: lb_ip.stdout != ""
       failed_when: lb_ip.rc != 0
-      ignore_errors: true  # Don't fail the playbook if the ingress controller isn't deployed yet
+      when: ingress_ns.rc == 0
 
     - name: Show the LoadBalancer IP
       ansible.builtin.debug:
         msg: "The ingress-nginx-controller LoadBalancer IP is: {{ lb_ip.stdout }}"
-      when: lb_ip.stdout != ""
+      when: ingress_ns.rc == 0 and lb_ip.stdout != ""
 
     - name: Verify MetalLB status
       ansible.builtin.shell: |

@@ -6,16 +6,6 @@
       ansible.builtin.include_vars:
         file: k8s_vars.yml
 
-- name: Install required Python modules on control machine
-  hosts: localhost
-  gather_facts: false
-  tasks:
-    - name: Install Python Kubernetes module
-      ansible.builtin.pip:
-        name: kubernetes
-        state: present
-      become: false
-
 - name: Prepare hosts for Kubernetes
   hosts: all
   become: true
@@ -94,6 +84,29 @@
         state: present
         update_cache: true
 
+- name: Reset stale Kubernetes state on worker nodes
+  hosts: "arthur,ford,trillian"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check for existing Kubernetes configuration
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf
+
+    - name: Reset kubeadm on workers with stale state
+      ansible.builtin.command: kubeadm reset --force
+      when: kubelet_conf.stat.exists
+      register: kubeadm_reset
+      changed_when: kubeadm_reset.rc == 0
+      failed_when: kubeadm_reset.rc != 0
+
+    - name: Remove stale CNI configuration
+      ansible.builtin.file:
+        path: /etc/cni/net.d
+        state: absent
+      when: kubelet_conf.stat.exists
+
 - name: Install containerd
   hosts: all
   become: true
@@ -127,7 +140,8 @@
     - name: Add Docker repository
       ansible.builtin.apt_repository:
         repo: >-
-          deb [arch={{ ansible_architecture }} signed-by=/etc/apt/keyrings/docker.gpg]
+          deb [arch={{ ansible_architecture | regex_replace('x86_64', 'amd64') | regex_replace('aarch64', 'arm64') }}
+          signed-by=/etc/apt/keyrings/docker.gpg]
           https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
         filename: docker
         state: present
@@ -224,6 +238,26 @@
         name: kubelet
         enabled: true
 
+- name: Install Helm on control plane
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if Helm is already installed
+      ansible.builtin.command: helm version --short
+      register: helm_check
+      changed_when: false
+      failed_when: false
+
+    - name: Install Helm via official install script
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: helm_check.rc != 0
+
 - name: Initialize Kubernetes control plane
   hosts: "disasterarea"
   become: true
@@ -303,6 +337,40 @@
       changed_when: false
       when: admin_conf_stat.stat.exists
       failed_when: false
+
+- name: Fetch kubeconfig to local machine
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if admin.conf exists
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_fetch_stat
+
+    - name: Ensure ~/.kube directory exists on local machine
+      ansible.builtin.file:
+        path: "{{ lookup('env', 'HOME') }}/.kube"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+      when: admin_conf_fetch_stat.stat.exists
+
+    - name: Fetch kubeconfig from control plane to local machine
+      ansible.builtin.fetch:
+        src: /etc/kubernetes/admin.conf
+        dest: "{{ lookup('env', 'HOME') }}/.kube/config"
+        flat: true
+      when: admin_conf_fetch_stat.stat.exists
+
+    - name: Set kubeconfig permissions on local machine
+      ansible.builtin.file:
+        path: "{{ lookup('env', 'HOME') }}/.kube/config"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      when: admin_conf_fetch_stat.stat.exists
 
 - name: Join worker nodes to cluster
   hosts: "arthur,ford,trillian"

@@ -207,8 +207,8 @@
           Volumes: {{ volumes_check.resources | default([]) | length }} found
           
           Access Longhorn UI:
-          1. Via Ingress: http://longhorn.home
-             Make sure to add 'longhorn.home' to your hosts file
+          1. Via Ingress: http://longhorn.lab
+             Make sure to add 'longhorn.lab' to your hosts file
           2. Via port-forwarding: kubectl port-forward -n longhorn-system service/longhorn-frontend 8000:80
              Then open http://localhost:8000 in your browser
       when: admin_conf_stat.stat.exists | default(false)

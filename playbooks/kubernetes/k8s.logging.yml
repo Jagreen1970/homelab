@@ -1,13 +1,15 @@
 ---
 - name: Load Kubernetes variables
-  hosts: localhost
+  hosts: disasterarea
   tasks:
     - name: Include Kubernetes variables
       ansible.builtin.include_vars:
         file: k8s_vars.yml
 
 - name: Deploy logging stack
-  hosts: localhost
+  hosts: disasterarea
+  become: true
+  remote_user: admin
   gather_facts: false
   vars:
     helm_repo_name: grafana

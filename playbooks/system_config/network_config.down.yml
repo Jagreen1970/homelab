@@ -1,0 +1,12 @@
+---
+- name: Re-enable WiFi interfaces on K8s worker nodes
+  hosts: k8s_workers
+  remote_user: admin
+  become: true
+
+  tasks:
+    - name: Unblock all WiFi radios
+      ansible.builtin.command:
+        cmd: rfkill unblock wifi
+      register: rfkill_result
+      changed_when: rfkill_result.rc == 0

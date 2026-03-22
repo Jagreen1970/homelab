@@ -28,7 +28,7 @@ if ! kubectl -n longhorn-system get ingress longhorn-ingress &>/dev/null; then
   echo "❌ Longhorn ingress not found. You may need to manually apply the ingress manifest."
   echo "kubectl apply -f $(dirname "$0")/longhorn-ingress.yaml"
 else
-  echo "✅ Longhorn ingress configured at: longhorn.home"
+  echo "✅ Longhorn ingress configured at: longhorn.lab"
 fi
 
 # Check if Longhorn UI is running
@@ -60,8 +60,8 @@ kubectl -n longhorn-system get volumes.longhorn.io || echo "No volumes found"
 
 echo ""
 echo "=== Access Longhorn UI ==="
-echo "1. Via Ingress: http://longhorn.home"
-echo "   Make sure to add 'longhorn.home' to your hosts file"
+echo "1. Via Ingress: http://longhorn.lab"
+echo "   Make sure to add 'longhorn.lab' to your hosts file"
 echo "2. Via port-forwarding: kubectl port-forward -n longhorn-system service/longhorn-frontend 8000:80"
 echo "   Then open http://localhost:8000 in your browser"
 

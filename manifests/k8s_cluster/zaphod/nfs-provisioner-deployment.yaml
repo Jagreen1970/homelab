@@ -19,7 +19,7 @@ spec:
       serviceAccountName: nfs-client-provisioner
       containers:
         - name: nfs-client-provisioner
-          image: k8s.gcr.io/sig-storage/nfs-subdir-external-provisioner:v4.0.2
+          image: registry.k8s.io/sig-storage/nfs-subdir-external-provisioner:v4.0.2
           volumeMounts:
             - name: nfs-client-root
               mountPath: /persistentvolumes
@@ -27,11 +27,11 @@ spec:
             - name: PROVISIONER_NAME
               value: k8s-sigs.io/nfs-subdir-external-provisioner
             - name: NFS_SERVER
-              value: zaphod
+              value: zaphod.home
             - name: NFS_PATH
               value: /volume1/kubernetes
       volumes:
         - name: nfs-client-root
           nfs:
-            server: zaphod
+            server: zaphod.home
             path: /volume1/kubernetes

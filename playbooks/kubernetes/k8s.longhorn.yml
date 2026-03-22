@@ -421,9 +421,9 @@
           - Longhorn provides highly available persistent storage with data replication
           - Use storageClassName: longhorn-distributed in PVCs to utilize Longhorn storage
           - The Longhorn UI can be accessed via:
-            1. Ingress: http://longhorn.home
+            1. Ingress: http://longhorn.lab
             2. Port-forwarding: kubectl port-forward -n longhorn-system service/longhorn-frontend 8000:80
-          - To access via hostname, add "longhorn.home" to your hosts file
+          - To access via hostname, add "longhorn.lab" to your hosts file
 
           Troubleshooting:
           {% if test_pod_result.rc is defined and test_pod_result.rc != 0 %}

@@ -173,13 +173,13 @@ Longhorn provides a web UI for managing and monitoring your storage. There are t
 We've configured an Ingress resource to make the Longhorn UI accessible via a hostname:
 
 ```
-http://longhorn.home
+http://longhorn.lab
 ```
 
 To use this hostname, you'll need to add it to your hosts file (/etc/hosts on Linux/Mac, C:\Windows\System32\drivers\etc\hosts on Windows):
 
 ```
-<CLUSTER_IP> longhorn.home
+<CLUSTER_IP> longhorn.lab
 ```
 
 Replace `<CLUSTER_IP>` with the IP address of any node in your cluster.
