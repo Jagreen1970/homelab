@@ -132,7 +132,7 @@ LAN clients route all traffic through OPNsense. You need to tell OPNsense how to
 2. Click **➕ Add**
 3. Fill in:
    - **Destination network**: `10.1.1.0/24`
-   - **Gateway**: `192.168.1.166` _(disasterarea — the most likely MetalLB speaker node)_
+   - **Gateway**: `192.168.1.166` *(disasterarea — the most likely MetalLB speaker node)*
    - **Description**: `K8s MetalLB pool`
 4. Click **Save**, then **Apply changes**
 
@@ -651,8 +651,8 @@ creates an Unbound `redirect` zone for the domain. Redirect zones require ALL re
 at the zone apex — you cannot have both `*.lab` (redirect zone) and `arthur.lab` (individual
 record) in the same domain. They're fundamentally incompatible in Unbound's zone model.
 
-**The fix:** Remove the wildcard immediately (`Services → Unbound DNS → Host Overrides →
-delete the `*` entry → Apply changes`). Then add **individual** host overrides for each K8s
+**The fix:** Remove the wildcard immediately (Services → Unbound DNS → Host Overrides →
+delete the `*` entry → Apply changes). Then add **individual** host overrides for each K8s
 service:
 
 | Host | Domain | IP | Description |

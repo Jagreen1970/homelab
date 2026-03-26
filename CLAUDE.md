@@ -82,9 +82,13 @@ Proactively write to Obsidian without waiting to be asked:
   (ADR-004, ADR-005, ...). Append the ADR link to the relevant workstream note under
   "Decisions Made".
 
-- **Workstream progress**: When a task from `pmo/` is completed, patch the corresponding
-  checkbox in the matching `Homelab/Workstreams/` note and append a dated entry to the
-  "Progress Log" section: `**YYYY-MM-DD**: Completed Task NN — <brief description>.`
+- **Workstream progress**: When a task from `pmo/` is completed, append a dated entry to
+  the "Progress Log" section of the matching `Homelab/Workstreams/` note:
+  `**YYYY-MM-DD**: Completed Task NN — <brief description>.`
+  Use `obsidian_patch_content` with `target_type: heading`, `operation: append`, and
+  `target: "<H1 title>::Progress Log"` — the full path from the document root is required.
+  Example: `"Workstream: K8s Reliability Improvements::Progress Log"`.
+  Headings nested under a `#` title are NOT accessible by their name alone.
 
 - **Component knowledge**: When a non-obvious discovery is made about a deployed component
   (config quirk, required pre-condition, issue + resolution, operational procedure), append
