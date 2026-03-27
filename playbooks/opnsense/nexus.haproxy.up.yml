@@ -1,0 +1,427 @@
+---
+# Configures OPNsense HAProxy for Nexus registry via REST API.
+#
+# Resource model (os-haproxy 5.x):
+#   Servers → Backends → ACLs (conditions) → Actions (routing) → Frontend
+#   Frontend.linkedActions references Action UUIDs.
+#   Action.linkedAcls + Action.use_backend wires condition → backend.
+#
+# Prereqs:
+#   - os-haproxy plugin installed in OPNsense UI:
+#       System → Firmware → Plugins → os-haproxy → +
+#       (ansibleguy.opnsense.package fires an async install that does not wait for completion)
+#   - OPNsense API key/secret in group_vars/opnsense/vault.yml (ansible-vault)
+#   - TLS certificate named {{ nexus_cert_name }} in OPNsense Trust store (subtask 05d)
+#
+# Run:
+#   ansible-playbook -i inventory.yml playbooks/opnsense/nexus.haproxy.up.yml --vault-password-file .vault_pass
+
+- name: Configure OPNsense HAProxy for Nexus registry
+  hosts: opnsense
+  gather_facts: false
+
+  vars_files:
+    - opnsense_vars.yml
+
+  vars:
+    _api: "https://{{ opnsense_host }}:{{ opnsense_port }}/api"
+
+  module_defaults:
+    ansible.builtin.uri:
+      url_username: "{{ vault_opnsense_api_key }}"
+      url_password: "{{ vault_opnsense_api_secret }}"
+      force_basic_auth: true
+      validate_certs: "{{ opnsense_ssl_verify }}"
+      status_code: [200]
+
+  tasks:
+
+    # -------------------------------------------------------------------------
+    # 1. Verify os-haproxy plugin is installed
+    # -------------------------------------------------------------------------
+    - name: Check os-haproxy plugin is installed
+      ansible.builtin.uri:
+        url: "{{ _api }}/core/firmware/info"
+        method: GET
+      register: r_fw
+
+    - name: Fail if os-haproxy plugin is not installed
+      ansible.builtin.fail:
+        msg: >
+          Plugin 'os-haproxy' is not installed.
+          Install it: OPNsense UI → System → Firmware → Plugins → os-haproxy → +
+      when: >-
+        r_fw.json.package
+        | selectattr('name', 'equalto', 'os-haproxy')
+        | selectattr('installed', 'equalto', '1')
+        | list | length == 0
+
+    # -------------------------------------------------------------------------
+    # 2. Resolve HAProxy-internal certificate key
+    # HAProxy uses its own internal cert keys (not trust store UUIDs).
+    # The valid keys are returned by getFrontend's ssl_certificates field.
+    # -------------------------------------------------------------------------
+    - name: Get HAProxy certificate options
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/getFrontend"
+        method: GET
+      register: r_frontend_template
+
+    - name: Fail if certificate not found in HAProxy cert list
+      ansible.builtin.fail:
+        msg: >
+          Certificate '{{ nexus_cert_name }}' not found in HAProxy cert list.
+          Complete subtask 05d first: System → Trust → Certificates → Add.
+      when: >-
+        r_frontend_template.json.frontend.ssl_certificates
+        | dict2items
+        | selectattr('value.value', 'equalto', nexus_cert_name)
+        | list | length == 0
+
+    - name: Set HAProxy certificate key fact
+      ansible.builtin.set_fact:
+        _cert_key: >-
+          {{ r_frontend_template.json.frontend.ssl_certificates
+             | dict2items
+             | selectattr('value.value', 'equalto', nexus_cert_name)
+             | map(attribute='key') | first }}
+
+    # -------------------------------------------------------------------------
+    # 3. Real servers
+    # -------------------------------------------------------------------------
+    - name: Search existing servers
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchServers"
+        method: GET
+      register: r_servers
+
+    - name: Set existing server names
+      ansible.builtin.set_fact:
+        _existing_servers: "{{ r_servers.json.rows | map(attribute='name') | list }}"
+
+    - name: Add server — nexus_ui (:{{ nexus_port_ui }})
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addServer"
+        method: POST
+        body_format: json
+        body:
+          server:
+            enabled: "1"
+            name: nexus_ui
+            description: "Nexus UI (managed by Ansible)"
+            address: "{{ nexus_ip }}"
+            port: "{{ nexus_port_ui | string }}"
+      when: "'nexus_ui' not in _existing_servers"
+
+    - name: Add server — nexus_docker_proxy (:{{ nexus_port_docker_proxy }})
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addServer"
+        method: POST
+        body_format: json
+        body:
+          server:
+            enabled: "1"
+            name: nexus_docker_proxy
+            description: "Nexus Docker Hub proxy (managed by Ansible)"
+            address: "{{ nexus_ip }}"
+            port: "{{ nexus_port_docker_proxy | string }}"
+      when: "'nexus_docker_proxy' not in _existing_servers"
+
+    - name: Add server — nexus_docker_local (:{{ nexus_port_docker_local }})
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addServer"
+        method: POST
+        body_format: json
+        body:
+          server:
+            enabled: "1"
+            name: nexus_docker_local
+            description: "Nexus local Docker registry (managed by Ansible)"
+            address: "{{ nexus_ip }}"
+            port: "{{ nexus_port_docker_local | string }}"
+      when: "'nexus_docker_local' not in _existing_servers"
+
+    - name: Re-fetch servers for UUIDs
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchServers"
+        method: GET
+      register: r_servers_final
+
+    - name: Set server UUID facts
+      ansible.builtin.set_fact:
+        _uuid_server_ui: >-
+          {{ r_servers_final.json.rows | selectattr('name', 'equalto', 'nexus_ui') | map(attribute='uuid') | first }}
+        _uuid_server_dp: >-
+          {{ r_servers_final.json.rows | selectattr('name', 'equalto', 'nexus_docker_proxy') | map(attribute='uuid') | first }}
+        _uuid_server_dl: >-
+          {{ r_servers_final.json.rows | selectattr('name', 'equalto', 'nexus_docker_local') | map(attribute='uuid') | first }}
+
+    # -------------------------------------------------------------------------
+    # 4. Backend pools
+    # -------------------------------------------------------------------------
+    - name: Search existing backends
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchBackends"
+        method: GET
+      register: r_backends
+
+    - name: Set existing backend names
+      ansible.builtin.set_fact:
+        _existing_backends: "{{ r_backends.json.rows | map(attribute='name') | list }}"
+
+    - name: Add backend — nexus_ui_pool
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addBackend"
+        method: POST
+        body_format: json
+        body:
+          backend:
+            enabled: "1"
+            name: nexus_ui_pool
+            description: "Nexus UI backend pool (managed by Ansible)"
+            mode: http
+            linkedServers: "{{ _uuid_server_ui }}"
+            healthCheckEnabled: "1"
+      when: "'nexus_ui_pool' not in _existing_backends"
+
+    - name: Add backend — nexus_docker_proxy_pool
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addBackend"
+        method: POST
+        body_format: json
+        body:
+          backend:
+            enabled: "1"
+            name: nexus_docker_proxy_pool
+            description: "Nexus Docker Hub proxy pool (managed by Ansible)"
+            mode: http
+            linkedServers: "{{ _uuid_server_dp }}"
+            healthCheckEnabled: "1"
+      when: "'nexus_docker_proxy_pool' not in _existing_backends"
+
+    - name: Add backend — nexus_docker_local_pool
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addBackend"
+        method: POST
+        body_format: json
+        body:
+          backend:
+            enabled: "1"
+            name: nexus_docker_local_pool
+            description: "Nexus local Docker registry pool (managed by Ansible)"
+            mode: http
+            linkedServers: "{{ _uuid_server_dl }}"
+            healthCheckEnabled: "1"
+      when: "'nexus_docker_local_pool' not in _existing_backends"
+
+    - name: Re-fetch backends for UUIDs
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchBackends"
+        method: GET
+      register: r_backends_final
+
+    - name: Set backend UUID facts
+      ansible.builtin.set_fact:
+        _uuid_backend_ui: >-
+          {{ r_backends_final.json.rows | selectattr('name', 'equalto', 'nexus_ui_pool') | map(attribute='uuid') | first }}
+        _uuid_backend_dp: >-
+          {{ r_backends_final.json.rows | selectattr('name', 'equalto', 'nexus_docker_proxy_pool') | map(attribute='uuid') | first }}
+        _uuid_backend_dl: >-
+          {{ r_backends_final.json.rows | selectattr('name', 'equalto', 'nexus_docker_local_pool') | map(attribute='uuid') | first }}
+
+    # -------------------------------------------------------------------------
+    # 5. ACLs (hostname match conditions)
+    # -------------------------------------------------------------------------
+    - name: Search existing ACLs
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchAcls"
+        method: GET
+      register: r_acls
+
+    - name: Set existing ACL names
+      ansible.builtin.set_fact:
+        _existing_acls: "{{ r_acls.json.rows | map(attribute='name') | list }}"
+
+    - name: Add ACL — acl_nexus_host
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAcl"
+        method: POST
+        body_format: json
+        body:
+          acl:
+            name: acl_nexus_host
+            description: "Match nexus.home Host header (managed by Ansible)"
+            expression: hdr
+            hdr: "nexus.home"
+            caseSensitive: "0"
+      when: "'acl_nexus_host' not in _existing_acls"
+
+    - name: Add ACL — acl_docker_proxy_host
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAcl"
+        method: POST
+        body_format: json
+        body:
+          acl:
+            name: acl_docker_proxy_host
+            description: "Match docker-proxy.home Host header (managed by Ansible)"
+            expression: hdr
+            hdr: "docker-proxy.home"
+            caseSensitive: "0"
+      when: "'acl_docker_proxy_host' not in _existing_acls"
+
+    - name: Add ACL — acl_docker_local_host
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAcl"
+        method: POST
+        body_format: json
+        body:
+          acl:
+            name: acl_docker_local_host
+            description: "Match docker.home Host header (managed by Ansible)"
+            expression: hdr
+            hdr: "docker.home"
+            caseSensitive: "0"
+      when: "'acl_docker_local_host' not in _existing_acls"
+
+    - name: Re-fetch ACLs for UUIDs
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchAcls"
+        method: GET
+      register: r_acls_final
+
+    - name: Set ACL UUID facts
+      ansible.builtin.set_fact:
+        _uuid_acl_nexus: >-
+          {{ r_acls_final.json.rows | selectattr('name', 'equalto', 'acl_nexus_host') | map(attribute='uuid') | first }}
+        _uuid_acl_dp: >-
+          {{ r_acls_final.json.rows | selectattr('name', 'equalto', 'acl_docker_proxy_host') | map(attribute='uuid') | first }}
+        _uuid_acl_dl: >-
+          {{ r_acls_final.json.rows | selectattr('name', 'equalto', 'acl_docker_local_host') | map(attribute='uuid') | first }}
+
+    # -------------------------------------------------------------------------
+    # 6. Actions (condition → backend routing)
+    # -------------------------------------------------------------------------
+    - name: Search existing actions
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchActions"
+        method: GET
+      register: r_actions
+
+    - name: Set existing action names
+      ansible.builtin.set_fact:
+        _existing_actions: "{{ r_actions.json.rows | map(attribute='name') | list }}"
+
+    - name: Add action — route_to_nexus_ui (if acl_nexus_host)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: route_to_nexus_ui
+            description: "Route nexus.home to Nexus UI (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _uuid_acl_nexus }}"
+            type: use_backend
+            use_backend: "{{ _uuid_backend_ui }}"
+      when: "'route_to_nexus_ui' not in _existing_actions"
+
+    - name: Add action — route_to_docker_proxy (if acl_docker_proxy_host)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: route_to_docker_proxy
+            description: "Route docker-proxy.home to Docker Hub proxy (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _uuid_acl_dp }}"
+            type: use_backend
+            use_backend: "{{ _uuid_backend_dp }}"
+      when: "'route_to_docker_proxy' not in _existing_actions"
+
+    - name: Add action — route_to_docker_local (if acl_docker_local_host)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: route_to_docker_local
+            description: "Route docker.home to local Docker registry (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _uuid_acl_dl }}"
+            type: use_backend
+            use_backend: "{{ _uuid_backend_dl }}"
+      when: "'route_to_docker_local' not in _existing_actions"
+
+    - name: Re-fetch actions for UUIDs
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchActions"
+        method: GET
+      register: r_actions_final
+
+    - name: Set action UUID facts
+      ansible.builtin.set_fact:
+        _uuid_action_nexus: >-
+          {{ r_actions_final.json.rows | selectattr('name', 'equalto', 'route_to_nexus_ui') | map(attribute='uuid') | first }}
+        _uuid_action_dp: >-
+          {{ r_actions_final.json.rows | selectattr('name', 'equalto', 'route_to_docker_proxy') | map(attribute='uuid') | first }}
+        _uuid_action_dl: >-
+          {{ r_actions_final.json.rows | selectattr('name', 'equalto', 'route_to_docker_local') | map(attribute='uuid') | first }}
+
+    # -------------------------------------------------------------------------
+    # 7. Frontend (HTTPS with TLS offload + action-based routing)
+    # -------------------------------------------------------------------------
+    - name: Search existing frontends
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchFrontends"
+        method: GET
+      register: r_frontends
+
+    - name: Set existing frontend names
+      ansible.builtin.set_fact:
+        _existing_frontends: "{{ r_frontends.json.rows | map(attribute='name') | list }}"
+
+    - name: Add frontend — nexus_https
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addFrontend"
+        method: POST
+        body_format: json
+        body:
+          frontend:
+            enabled: "1"
+            name: nexus_https
+            description: "Nexus HTTPS frontend with SNI routing (managed by Ansible)"
+            bind: "0.0.0.0:443"
+            mode: http
+            ssl_enabled: "1"
+            ssl_certificates: "{{ _cert_key }}"
+            defaultBackend: "{{ _uuid_backend_ui }}"
+            linkedActions: "{{ _uuid_action_nexus }},{{ _uuid_action_dp }},{{ _uuid_action_dl }}"
+      when: "'nexus_https' not in _existing_frontends"
+
+    # -------------------------------------------------------------------------
+    # 8. Enable HAProxy service + apply configuration
+    # -------------------------------------------------------------------------
+    - name: Enable HAProxy service
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/set"
+        method: POST
+        body_format: json
+        body:
+          haproxy:
+            general:
+              enabled: "1"
+
+    - name: Apply HAProxy configuration (reconfigure)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/service/reconfigure"
+        method: POST
+        body_format: json
+        body: {}

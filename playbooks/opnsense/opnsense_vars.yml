@@ -1,0 +1,20 @@
+---
+# Shared variables for OPNsense Ansible playbooks
+# Secrets (api_key, api_secret) live in group_vars/opnsense/vault.yml (Ansible Vault)
+
+opnsense_host: 192.168.1.1
+opnsense_port: 8443
+opnsense_ssl_verify: false        # OPNsense uses a self-signed cert by default
+                                  # Set to true if you've installed a valid cert on OPNsense
+
+# Nexus registry host
+nexus_ip: 192.168.1.207           # zaphod's LAN IP
+
+# TLS certificate descriptive name — must match exactly what is in OPNsense UI
+# (System → Trust → Certificates → descriptive name column)
+nexus_cert_name: nexus-homelab
+
+# Nexus service ports
+nexus_port_ui: 18081
+nexus_port_docker_proxy: 18082
+nexus_port_docker_local: 18083

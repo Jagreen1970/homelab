@@ -1,159 +1,155 @@
 # Task 05 — OPNsense HAProxy + internal CA + Unbound DNS
 
-## Status: TODO
+## Status: DONE
 ## Priority: HIGH
 ## Prereqs: task-04
 
 ## Summary
-Install the OPNsense HAProxy plugin, create an internal CA and server certificate,
-configure HAProxy to route three Nexus hostnames to their respective backend ports,
-and add Unbound DNS host overrides for all three hostnames.
+Configure OPNsense to route `nexus.home`, `docker.home`, and `docker-proxy.home`
+to Nexus on zaphod via HAProxy (TLS termination) and Unbound DNS.
 
-The CA certificate created here must be exported for use in task-06 (K8s node trust).
-
----
-
-## Part A — Install HAProxy plugin
-
-1. OPNsense → System → Firmware → Plugins
-2. Search `os-haproxy` → click **+** to install
-3. After installation: **Services → HAProxy** appears in the left navigation menu
+Most of this task is automated via Ansible. PKI (CA + cert) is a one-time manual step.
 
 ---
 
-## Part B — Create internal CA and server certificate
+## Subtasks
 
-### Create the Certificate Authority
-1. System → Trust → **Certificate Authorities** → Add
-   - Descriptive name: `Homelab CA`
-   - Method: Create an internal Certificate Authority
-   - Key type: RSA, 4096 bits
-   - Digest algorithm: SHA-256
-   - Lifetime (days): 3650 (10 years)
-   - Country, state, city: fill as desired
-2. **Save**
-3. **Export CA certificate** (Actions → Export CA cert) — save as `homelab-ca.pem`
-   This file is needed for task-06 (K8s node distribution)
-
-### Create the server certificate
-1. System → Trust → **Certificates** → Add
-   - Method: Create an internal Certificate
-   - Certificate Authority: `Homelab CA`
-   - Descriptive name: `nexus-homelab`
-   - Key type: RSA, 2048 bits
-   - Digest algorithm: SHA-256
-   - Lifetime (days): 825 (max accepted by most clients)
-   - Common name: `nexus.home`
-   - Alternative Names — add all three:
-     - DNS: `nexus.home`
-     - DNS: `docker.home`
-     - DNS: `docker-proxy.home`
-2. **Save**
-
----
-
-## Part C — Configure HAProxy backends
-
-### Real Servers (Services → HAProxy → Settings → Real Servers)
-Add one entry per Nexus port:
-
-| Name | IP/Host | Port | Mode |
+| # | Subtask | How | Status |
 |---|---|---|---|
-| `nexus_ui` | zaphod LAN IP | 18081 | active |
-| `nexus_docker_proxy` | zaphod LAN IP | 18082 | active |
-| `nexus_docker_local` | zaphod LAN IP | 18083 | active |
-
-### Backend Pools (Virtual Services → Backends)
-Add one pool per server:
-
-| Pool name | Server | Health check |
-|---|---|---|
-| `nexus_ui_pool` | `nexus_ui` | TCP |
-| `nexus_docker_proxy_pool` | `nexus_docker_proxy` | TCP |
-| `nexus_docker_local_pool` | `nexus_docker_local` | TCP |
+| 05a | Enable OPNsense API + create API key | Manual (OPNsense UI) | DONE |
+| 05b | Install `ansibleguy.opnsense` collection | `ansible-galaxy collection install -r requirements.yml` | DONE |
+| 05b2 | Install `os-haproxy` plugin in OPNsense UI | System → Firmware → Plugins → os-haproxy → + | TODO |
+| 05c | Fill in Ansible Vault with API credentials | Edit `group_vars/opnsense/vault.yml` | DONE |
+| 05d | Create Homelab CA + `nexus-homelab` cert in OPNsense UI | Manual (System → Trust) | TODO |
+| 05e | Run `nexus.haproxy.up.yml` | Ansible — installs plugin + configures HAProxy | DONE |
+| 05f | Run `nexus.dns.up.yml` | Ansible — adds Unbound host overrides | DONE |
+| 05g | Export CA cert + update Nexus base URL | Manual (one export + one UI step) | DONE |
 
 ---
 
-## Part D — Configure HAProxy frontend
+## Subtask 05a — Enable OPNsense API (manual)
 
-### ACL Rules (Settings → Rules & Checks → Rules)
-Add 3 conditions:
-
-| Name | Expression | Value |
-|---|---|---|
-| `is_nexus` | Host matches | `nexus.home` |
-| `is_docker_proxy` | Host matches | `docker-proxy.home` |
-| `is_docker_local` | Host matches | `docker.home` |
-
-### Frontend (Virtual Services → Frontends)
-Add one HTTPS frontend:
-- Name: `nexus_https`
-- Listen address: `0.0.0.0:443`
-- Type: HTTP / HTTPS (SSL offloading)
-- Default backend pool: `nexus_ui_pool`
-- SSL offloading: enabled
-- Certificate: select `nexus-homelab` (created in Part B)
-- Add actions:
-  - If `is_nexus` → Use backend pool `nexus_ui_pool`
-  - If `is_docker_proxy` → Use backend pool `nexus_docker_proxy_pool`
-  - If `is_docker_local` → Use backend pool `nexus_docker_local_pool`
-
-### Enable HAProxy
-- Services → HAProxy → Settings → General → check **Enable HAProxy**
-- Click **Apply** (top of page)
+1. OPNsense → System → Settings → Administration → check **Enable API** → Save
+2. System → Access → Users → `admin` → API keys tab → **+** (Add key)
+3. Download the CSV — copy the key and secret for use in 05c
 
 ---
 
-## Part E — Unbound DNS host overrides
+## Subtask 05b — Install Ansible collection
 
-Services → Unbound DNS → Overrides → **Host Overrides** → Add:
+```bash
+ansible-galaxy collection install -r requirements.yml
+```
 
-| Host | Domain | Type | IP |
-|---|---|---|---|
-| `nexus` | `home` | A | zaphod LAN IP |
-| `docker` | `home` | A | zaphod LAN IP |
-| `docker-proxy` | `home` | A | zaphod LAN IP |
-
-Click **Apply** → **Reconfigure Unbound**
+`requirements.yml` is in the repo root. It installs `ansibleguy.opnsense`.
 
 ---
 
-## Part F — Update Nexus Base URL
+## Subtask 05c — Configure Ansible Vault
 
-- Nexus → Administration → System → **Base URL**
-- Set to: `https://nexus.home`
-- Save
+Edit `group_vars/opnsense/vault.yml` and fill in the API credentials from 05a:
+```bash
+ansible-vault edit group_vars/opnsense/vault.yml
+```
+
+Set `vault_opnsense_api_key` and `vault_opnsense_api_secret`.
+Then encrypt the file:
+```bash
+ansible-vault encrypt group_vars/opnsense/vault.yml
+```
+
+---
+
+## Subtask 05d — Create CA + cert in OPNsense UI (manual)
+
+### Certificate Authority
+- System → Trust → Certificate Authorities → **Add**
+  - Name: `Homelab CA`
+  - Method: Create an internal Certificate Authority
+  - Key: RSA 4096 | Digest: SHA-256 | Lifetime: 3650 days
+
+### Server certificate
+- System → Trust → Certificates → **Add**
+  - Method: Create an internal Certificate
+  - CA: `Homelab CA`
+  - **Descriptive name: `nexus-homelab`** ← must match `nexus_cert_name` in opnsense_vars.yml
+  - Key: RSA 2048 | Digest: SHA-256 | Lifetime: 825 days
+  - Common name: `nexus.home`
+  - SANs: `nexus.home`, `docker.home`, `docker-proxy.home`
+
+---
+
+## Subtask 05e — Run HAProxy playbook
+
+```bash
+ansible-playbook -i inventory.yml playbooks/opnsense/nexus.haproxy.up.yml --ask-vault-pass
+```
+
+What it does:
+1. Installs `os-haproxy` plugin on OPNsense
+2. Resolves the `nexus-homelab` TLS cert UUID from OPNsense Trust store
+3. Creates 3 real servers (nexus_ui, nexus_docker_proxy, nexus_docker_local)
+4. Creates 3 backend pools (mode: http, health-check enabled)
+5. Creates 3 ACL rules with hostname matching + backend routing
+6. Creates `nexus_https` frontend on 0.0.0.0:443 with SNI routing + TLS offload
+7. Enables the HAProxy service and applies configuration (reconfigure)
+
+> **Note**: Uses `ansible.builtin.uri` to call OPNsense REST API directly because
+> `ansibleguy.opnsense` v1.2.16 has no HAProxy modules. Idempotent — skips resources
+> that already exist by name.
+
+---
+
+## Subtask 05f — Run DNS playbook
+
+```bash
+ansible-playbook -i inventory.yml playbooks/opnsense/nexus.dns.up.yml --ask-vault-pass
+```
+
+Adds Unbound host overrides: `nexus.home`, `docker.home`, `docker-proxy.home` → **192.168.1.1 (OPNsense)**
+HAProxy on OPNsense terminates TLS and proxies to zaphod (192.168.1.207) on the backend ports.
+
+---
+
+## Subtask 05g — Export CA cert + update Nexus base URL (manual)
+
+1. OPNsense → System → Trust → Certificate Authorities → `Homelab CA` → **Export CA cert**
+   - Save as `playbooks/kubernetes/files/homelab-ca.pem` (required for task-06)
+2. Nexus → Administration → System → Base URL → set `https://nexus.home` → Save
+
+---
+
+## Revert
+
+```bash
+ansible-playbook -i inventory.yml playbooks/opnsense/nexus.haproxy.down.yml --ask-vault-pass
+ansible-playbook -i inventory.yml playbooks/opnsense/nexus.dns.down.yml --ask-vault-pass
+```
 
 ---
 
 ## Verify
 
-From a workstation on the LAN:
 ```bash
-# DNS resolves correctly
-nslookup nexus.home        # → zaphod LAN IP
-nslookup docker.home       # → zaphod LAN IP
-nslookup docker-proxy.home # → zaphod LAN IP
-
-# HTTPS reaches Nexus (cert untrusted until CA is installed on client)
-curl -k https://nexus.home    # should return Nexus HTML
-curl --cacert homelab-ca.pem https://nexus.home   # should succeed with valid cert
+nslookup nexus.home 192.168.1.1        # → 192.168.1.207
+curl -k https://nexus.home             # → Nexus HTML (cert untrusted until CA installed)
+curl --cacert playbooks/kubernetes/files/homelab-ca.pem https://nexus.home  # → valid cert
 ```
 
-To trust the cert on your workstation: add `homelab-ca.pem` to your OS/browser trust
-store (Keychain on macOS, `update-ca-certificates` on Ubuntu).
-
-## Notes
-- HAProxy terminates TLS; Nexus itself receives plain HTTP on 18081/18082/18083
-- The single frontend with SNI routing means only one port (443) is needed externally
-- The exported `homelab-ca.pem` is required in task-06 for K8s node trust
+## Files
+- `requirements.yml` — collection dependency
+- `inventory.yml` — OPNsense host entry added
+- `group_vars/opnsense/vault.yml` — API credentials (encrypt with ansible-vault)
+- `playbooks/opnsense/opnsense_vars.yml` — shared vars
+- `playbooks/opnsense/nexus.haproxy.up.yml` / `nexus.haproxy.down.yml`
+- `playbooks/opnsense/nexus.dns.up.yml` / `nexus.dns.down.yml`
 
 ## Acceptance criteria
-- [ ] `os-haproxy` plugin installed
-- [ ] `Homelab CA` created, PEM exported as `homelab-ca.pem`
-- [ ] `nexus-homelab` server cert created with all 3 SANs
-- [ ] HAProxy real servers, backend pools, and frontend configured
-- [ ] HAProxy enabled and running
-- [ ] DNS overrides active (nslookup confirms)
+- [ ] 05a: OPNsense API enabled, API key created
+- [ ] 05b: `ansibleguy.opnsense` collection installed
+- [ ] 05c: Vault encrypted with API credentials
+- [ ] 05d: `Homelab CA` and `nexus-homelab` cert created in OPNsense UI
+- [ ] 05e: `nexus.haproxy.up.yml` runs without errors
+- [ ] 05f: `nexus.dns.up.yml` runs without errors
+- [ ] 05g: `homelab-ca.pem` exported, Nexus Base URL set to `https://nexus.home`
 - [ ] `curl -k https://nexus.home` returns Nexus HTML
-- [ ] Nexus Base URL updated to `https://nexus.home`

@@ -5,19 +5,20 @@ Self-hosted artifact registry on zaphod for local Docker images, Docker Hub pull
 cache, Helm charts, and generic artifacts. Clean HTTPS access via OPNsense HAProxy +
 internal CA, with full K8s integration via Ansible-managed containerd mirror config.
 
-## Status: TODO
+## Status: DONE
 
 ## Tasks (execution order)
 
 | # | Task | Status | Prereqs |
 |---|------|--------|---------|
 | 1 | [Pre-flight check on zaphod](task-01-preflight.md) | DONE | none |
-| 2 | [Deploy Nexus OSS via Portainer](task-02-deploy-portainer.md) | TODO | task-01 |
-| 3 | [Initial configuration](task-03-initial-config.md) | TODO | task-02 |
-| 4 | [Create repositories](task-04-create-repositories.md) | TODO | task-03 |
-| 5 | [OPNsense HAProxy + internal CA + Unbound DNS](task-05-haproxy-tls-dns.md) | TODO | task-04 |
-| 6 | [K8s integration (containerd mirror + CA trust)](task-06-k8s-integration.md) | TODO | task-05 |
-| 7 | [ArgoCD / Helm integration](task-07-argocd-helm.md) | TODO | task-06 |
+| 2 | [Deploy Nexus OSS via Portainer](task-02-deploy-portainer.md) | DONE | task-01 |
+| 3 | [Initial configuration](task-03-initial-config.md) | DONE | task-02 |
+| 4 | [Create repositories](task-04-create-repositories.md) | DONE | task-03 |
+| 5 | [OPNsense HAProxy + internal CA + Unbound DNS](task-05-haproxy-tls-dns.md) | DONE | task-04 |
+| 6 | [K8s integration (containerd mirror + CA trust)](task-06-k8s-integration.md) | DONE | task-05 |
+| 7 | [ArgoCD / Helm integration](task-07-argocd-helm.md) | DONE | task-06 |
+| 8 | [Disaster recovery & rebuild runbook](task-08-disaster-recovery-runbook.md) | DONE | tasks 01–07 |
 
 ## Infrastructure context
 - Registry host: zaphod (Synology DSM 7.x)

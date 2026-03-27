@@ -5,6 +5,7 @@ metadata:
   namespace: argocd
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    cert-manager.io/cluster-issuer: selfsigned-issuer
 spec:
   ingressClassName: nginx
   rules:
@@ -17,8 +18,8 @@ spec:
                 name: argocd-server
                 port:
                   name: https
-      host: grpc.argocd.home
+      host: grpc.argocd.lab
   tls:
     - hosts:
-        - grpc.argocd.home
+        - grpc.argocd.lab
       secretName: argocd-ingress-grpc

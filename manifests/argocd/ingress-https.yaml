@@ -6,6 +6,9 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    cert-manager.io/cluster-issuer: selfsigned-issuer
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
 spec:
   ingressClassName: nginx
   rules:
@@ -18,8 +21,8 @@ spec:
                 name: argocd-server
                 port:
                   name: http
-      host: argocd.home
+      host: argocd.lab
   tls:
     - hosts:
-        - argocd.home
+        - argocd.lab
       secretName: argocd-ingress-http

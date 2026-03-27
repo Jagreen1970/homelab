@@ -6,6 +6,7 @@ ansible.log
 
 # Secrets and local config
 vault_password_file
+.vault_pass
 *.vault
 secrets.yml
 *secret*

@@ -1,13 +1,13 @@
 # Task 06 — K8s integration (containerd mirror + CA trust)
 
-## Status: TODO
+## Status: DONE
 ## Priority: MEDIUM
 ## Prereqs: task-05
 
 ## Summary
 Configure all K8s nodes to trust the Homelab CA (so TLS connections to Nexus succeed)
 and configure containerd to use `docker-proxy.home` as a pull-through mirror for
-Docker Hub. Also create an imagePullSecret manifest for pulling from `homelab-docker`.
+Docker Hub. Also create an imagePullSecret manifest for pulling from `docker-lab`.
 
 ---
 

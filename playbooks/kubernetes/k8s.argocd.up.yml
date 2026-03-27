@@ -20,7 +20,7 @@
     - name: Download the ArgoCD installation manifest
       ansible.builtin.get_url:
         url: https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-        dest: ../../manifests/argocd/argocd-install.yaml
+        dest: "{{ playbook_dir }}/../../manifests/argocd/argocd-install.yaml"
         mode: '0644'
 
     - name: Install the ArgoCD installation manifest
@@ -48,16 +48,7 @@
         namespace: argocd
 
     - name: Restart the ArgoCD server deployment for the parameters to take effect
-      kubernetes.core.k8s:
-        state: present
-        namespace: argocd
-        definition:
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: "argocd-server"
-            namespace: "argocd"
-            annotations:
-              kubectl.kubernetes.io/restartedAt: "{{ ansible_date_time.iso8601 }}"
+      ansible.builtin.command:
+        cmd: kubectl rollout restart deployment/argocd-server -n argocd
 
 

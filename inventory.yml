@@ -24,3 +24,9 @@ homelab:
         arthur:
         ford:
         trillian:
+    opnsense:
+      hosts:
+        opnsense_fw:
+          ansible_host: 192.168.1.1
+          ansible_connection: local  # ansibleguy.opnsense uses REST API calls from controller
+          ansible_python_interpreter: "{{ playbook_dir }}/../../.venv/bin/python3"

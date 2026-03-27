@@ -1,6 +1,6 @@
 # Task 04 — Create repositories
 
-## Status: TODO
+## Status: DONE
 ## Priority: HIGH
 ## Prereqs: task-03
 
@@ -22,7 +22,7 @@ Administration → Repository → Repositories → **Create repository**
 - Allow anonymous docker pull: enable if you want unauthenticated pulls (optional)
 - Blob store: default
 
-### 2. `homelab-docker` (local image storage)
+### 2. `docker-lab` (local image storage)
 - Recipe: **docker (hosted)**
 - HTTP connector port: **18083**
 - HTTPS connector: leave blank
@@ -30,12 +30,12 @@ Administration → Repository → Repositories → **Create repository**
 - Allow anonymous docker pull: your choice
 - Blob store: default
 
-### 3. `homelab-helm` (Helm chart repository)
+### 3. `helm-lab` (Helm chart repository)
 - Recipe: **helm (hosted)**
 - Deployment policy: Allow redeploy
 - Blob store: default
 
-### 4. `homelab-generic` (raw/generic artifacts)
+### 4. `generic-lab` (raw/generic artifacts)
 - Recipe: **raw (hosted)**
 - Deployment policy: Allow redeploy
 - Blob store: default
@@ -59,8 +59,8 @@ After creating each repo:
 
 ## Acceptance criteria
 - [ ] `docker-hub-proxy` created, port 18082
-- [ ] `homelab-docker` created, port 18083
-- [ ] `homelab-helm` created
-- [ ] `homelab-generic` created
+- [ ] `docker-lab` created, port 18083
+- [ ] `helm-lab` created
+- [ ] `generic-lab` created
 - [ ] `go-proxy` created (optional)
 - [ ] All repos browsable in Nexus UI

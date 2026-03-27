@@ -1,6 +1,6 @@
 # Task 03 — Initial configuration
 
-## Status: TODO
+## Status: DONE
 ## Priority: HIGH
 ## Prereqs: task-02
 
@@ -43,7 +43,10 @@ This realm is required for `docker login` / `docker push` / `docker pull` to wor
   option for Docker repos)
 
 ## Acceptance criteria
-- [ ] Admin password changed and stored in password manager
-- [ ] Anonymous access disabled
-- [ ] Docker Bearer Token Realm active
-- [ ] Login with new password works
+- [x] Admin password changed and stored in password manager
+- [x] Anonymous access disabled
+- [x] Docker Bearer Token Realm active
+- [x] Login with new password works
+
+## Known issue
+Default Secret Encryption Key warning persists despite setting `NEXUS_SECURITY_SECRET_ENCRYPTION_KEY` env var. Logged in Components/Nexus.md for later investigation.

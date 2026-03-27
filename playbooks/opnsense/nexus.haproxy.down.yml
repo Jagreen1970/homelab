@@ -1,0 +1,119 @@
+---
+# Removes the HAProxy configuration created by nexus.haproxy.up.yml.
+# Does NOT uninstall the os-haproxy plugin.
+# Deletion order: frontend → actions → ACLs → backends → servers → reconfigure
+#
+# Run:
+#   ansible-playbook -i inventory.yml playbooks/opnsense/nexus.haproxy.down.yml --vault-password-file .vault_pass
+
+- name: Remove OPNsense HAProxy configuration for Nexus registry
+  hosts: opnsense
+  gather_facts: false
+
+  vars_files:
+    - opnsense_vars.yml
+
+  vars:
+    _api: "https://{{ opnsense_host }}:{{ opnsense_port }}/api"
+
+  module_defaults:
+    ansible.builtin.uri:
+      url_username: "{{ vault_opnsense_api_key }}"
+      url_password: "{{ vault_opnsense_api_secret }}"
+      force_basic_auth: true
+      validate_certs: "{{ opnsense_ssl_verify }}"
+      status_code: [200]
+
+  tasks:
+
+    - name: Search existing frontends
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchFrontends"
+        method: GET
+      register: r_frontends
+
+    - name: Remove frontend — nexus_https
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/delFrontend/{{ item }}"
+        method: POST
+        body_format: json
+        body: {}
+      loop: >-
+        {{ r_frontends.json.rows
+           | selectattr('name', 'equalto', 'nexus_https')
+           | map(attribute='uuid') | list }}
+
+    - name: Search existing actions
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchActions"
+        method: GET
+      register: r_actions
+
+    - name: Remove actions — route_to_nexus_ui, route_to_docker_proxy, route_to_docker_local
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/delAction/{{ item }}"
+        method: POST
+        body_format: json
+        body: {}
+      loop: >-
+        {{ r_actions.json.rows
+           | selectattr('name', 'in', ['route_to_nexus_ui', 'route_to_docker_proxy', 'route_to_docker_local'])
+           | map(attribute='uuid') | list }}
+
+    - name: Search existing ACLs
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchAcls"
+        method: GET
+      register: r_acls
+
+    - name: Remove ACLs — acl_nexus_host, acl_docker_proxy_host, acl_docker_local_host
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/delAcl/{{ item }}"
+        method: POST
+        body_format: json
+        body: {}
+      loop: >-
+        {{ r_acls.json.rows
+           | selectattr('name', 'in', ['acl_nexus_host', 'acl_docker_proxy_host', 'acl_docker_local_host'])
+           | map(attribute='uuid') | list }}
+
+    - name: Search existing backends
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchBackends"
+        method: GET
+      register: r_backends
+
+    - name: Remove backends — nexus_ui_pool, nexus_docker_proxy_pool, nexus_docker_local_pool
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/delBackend/{{ item }}"
+        method: POST
+        body_format: json
+        body: {}
+      loop: >-
+        {{ r_backends.json.rows
+           | selectattr('name', 'in', ['nexus_ui_pool', 'nexus_docker_proxy_pool', 'nexus_docker_local_pool'])
+           | map(attribute='uuid') | list }}
+
+    - name: Search existing servers
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchServers"
+        method: GET
+      register: r_servers
+
+    - name: Remove servers — nexus_ui, nexus_docker_proxy, nexus_docker_local
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/delServer/{{ item }}"
+        method: POST
+        body_format: json
+        body: {}
+      loop: >-
+        {{ r_servers.json.rows
+           | selectattr('name', 'in', ['nexus_ui', 'nexus_docker_proxy', 'nexus_docker_local'])
+           | map(attribute='uuid') | list }}
+
+    - name: Apply HAProxy configuration (reconfigure)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/service/reconfigure"
+        method: POST
+        body_format: json
+        body: {}

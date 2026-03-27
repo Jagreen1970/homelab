@@ -1,6 +1,6 @@
 # Task 02 — Deploy Nexus OSS via Portainer
 
-## Status: TODO
+## Status: DONE
 ## Priority: HIGH
 ## Prereqs: task-01
 
@@ -56,7 +56,11 @@ Open `http://zaphod-ip:18081` — the Nexus welcome/login page should load.
 - Ports 18082/18083 need Docker connector configuration inside Nexus (done in task-04)
 
 ## Acceptance criteria
-- [ ] `/volume1/docker/nexus/data` created, owned by UID 200
-- [ ] Portainer stack `nexus` deployed and container running
-- [ ] Logs show `Started Sonatype Nexus OSS`
-- [ ] `http://zaphod-ip:18081` loads Nexus login page
+- [x] `/volume1/docker/nexus/data` created, owned by UID 200
+- [x] Portainer stack `nexus` deployed and container running
+- [x] Logs show `Started SonatypeNexusRepositoryApplication` (v3.90.2-06 COMMUNITY edition)
+- [x] `http://192.168.1.207:18081` loads Nexus login page
+
+## Notes
+- WARN "Could not lock User prefs" repeats every 30s — harmless Java/container quirk, ignore
+- Sonatype rebranded "OSS" → "COMMUNITY" edition; same product, same Apache 2.0 license

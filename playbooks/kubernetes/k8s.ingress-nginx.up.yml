@@ -24,6 +24,14 @@
       changed_when: false
       failed_when: controller_ready.rc != 0
 
+    - name: Patch ingress-nginx controller to publish LoadBalancer IP as ingress address
+      ansible.builtin.shell: >
+        kubectl patch deployment ingress-nginx-controller -n ingress-nginx --type=json
+        -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--publish-service=ingress-nginx/ingress-nginx-controller"}]'
+      register: publish_patch
+      changed_when: "'patched' in publish_patch.stdout"
+      failed_when: publish_patch.rc != 0
+
     - name: Patch ingress-nginx service to LoadBalancer type for MetalLB
       ansible.builtin.shell: >
         kubectl patch svc ingress-nginx-controller -n ingress-nginx
