@@ -1,0 +1,820 @@
+---
+# Configures OPNsense HAProxy for all public-facing services (replacing NPM on zaphod).
+#
+# Resource model (os-haproxy 5.x):
+#   Servers → Backends → ACLs (conditions) → Actions (routing/header) → Frontend
+#   Frontend.linkedActions references Action UUIDs.
+#   Action.linkedAcls + Action.use_backend wires condition → backend.
+#
+# Services configured:
+#   - gitlab.stefan-strich.de  → 192.168.1.207:8080  (GitLab container on zaphod)
+#   - cloud.stefan-strich.de   → 192.168.1.207:8082  (Nextcloud container on zaphod)
+#   - www.stefan-strich.de     → 10.1.1.10:80        (MetalLB VIP, K8s — not yet built)
+#   - blog.stefan-strich.de    → 10.1.1.10:80        (MetalLB VIP, K8s — not yet built)
+#   - business.stefan-strich.de → 10.1.1.10:80       (MetalLB VIP, K8s — not yet built)
+#
+# Prereqs:
+#   - os-haproxy plugin installed in OPNsense UI:
+#       System → Firmware → Plugins → os-haproxy → +
+#   - OPNsense API key/secret in group_vars/opnsense/vault.yml (ansible-vault)
+#   - LetsEncrypt certificates for all 6 domains present in the OPNsense Trust store:
+#       System → Trust → Certificates (descriptive name must match public_certs list below)
+#   - Nextcloud config.php updated on zaphod (see task-07 notes — manual step)
+#
+# Run:
+#   ansible-playbook -i inventory.yml playbooks/opnsense/opnsense.haproxy.up.yml \
+#     --vault-password-file .vault_pass
+#
+# ---------------------------------------------------------------------------
+# ## Known OPNsense HAProxy API Quirks (discovered during task-07)
+# ---------------------------------------------------------------------------
+#
+# QUIRK 1 — No separate HAProxy SSL Certificates registry
+#   There is no GUI menu item or API endpoint for pre-registering certs with
+#   HAProxy. Certs are selected directly in the frontend config. The cert IDs
+#   used by frontends are HAProxy-plugin-internal short hex IDs, NOT Trust
+#   store UUIDs. Obtain them from GET /api/haproxy/settings/getFrontend (the
+#   schema response enumerates all available certs with label + internal key).
+#
+# QUIRK 2 — ACME Client appends " (ACME Client)" to cert description
+#   A cert issued for "example.com" gets descr = "example.com (ACME Client)".
+#   Bare domain name lookups against descr will fail. Match by commonname for
+#   bare-domain comparisons, or use the full " (ACME Client)" suffix in labels
+#   when matching against the getFrontend ssl_certificates enum values.
+#
+# QUIRK 3 — os-haproxy 5.x action types use a two-level model; redirect is broken
+#   Set-header actions: type "http-request" / "http-response" +
+#     http_request_action/http_response_action: "set-header", with
+#     http_request_set_header_name / http_request_set_header_content fields.
+#   Redirect actions: do NOT use type "http-request" + action "redirect" —
+#     the Jinja2 template for this combination has a bug and generates invalid
+#     HAProxy config. Use type "custom" instead and pass the full HAProxy
+#     directive as the "custom" field value (e.g.
+#     "http-request redirect location https://... code 301"). It is written
+#     verbatim into the config file.
+#
+# QUIRK 4 — ssl_certificates field takes HAProxy-internal IDs, not Trust UUIDs
+#   /api/trust/cert/search UUIDs are NOT accepted in the frontend
+#   ssl_certificates field. Use only the short hex keys from the getFrontend
+#   schema (see QUIRK 1). Passing Trust store UUIDs will silently fail.
+
+- name: Configure OPNsense HAProxy for public services (NPM migration)
+  hosts: opnsense
+  gather_facts: false
+
+  vars_files:
+    - opnsense_vars.yml
+
+  vars:
+    _api: "https://{{ opnsense_host }}:{{ opnsense_port }}/api"
+
+    # Certificate labels — must match the label shown in the HAProxy getFrontend
+    # ssl_certificates enum (i.e. the descr field from the OPNsense Trust store).
+    # OPNsense ACME Client appends " (ACME Client)" to the descriptive name.
+    # The HAProxy plugin uses its own short hex IDs (not Trust store UUIDs).
+    public_certs:
+      - "stefan-strich.de (ACME Client)"
+      - "gitlab.stefan-strich.de (ACME Client)"
+      - "cloud.stefan-strich.de (ACME Client)"
+      - "www.stefan-strich.de (ACME Client)"
+      - "blog.stefan-strich.de (ACME Client)"
+      - "business.stefan-strich.de (ACME Client)"
+
+    # Servers: name → address + port
+    public_servers:
+      - name: gitlab_zaphod
+        description: "GitLab container on zaphod (managed by Ansible)"
+        address: "192.168.1.207"
+        port: "8080"
+      - name: nextcloud_zaphod
+        description: "Nextcloud container on zaphod (managed by Ansible)"
+        address: "192.168.1.207"
+        port: "8082"
+      - name: k8s_vip_80
+        description: "K8s MetalLB VIP port 80 (managed by Ansible)"
+        address: "10.1.1.10"
+        port: "80"
+
+    # Backends: name → server + health check setting
+    # www/blog/business share the same k8s_vip_80 server;
+    # health checks disabled until K8s services are live.
+    public_backends:
+      - name: backend_gitlab
+        description: "GitLab backend pool (managed by Ansible)"
+        server: gitlab_zaphod
+        health_check: "1"
+      - name: backend_cloud
+        description: "Nextcloud backend pool (managed by Ansible)"
+        server: nextcloud_zaphod
+        health_check: "1"
+      - name: backend_www
+        description: "www backend pool — K8s MetalLB VIP (managed by Ansible)"
+        server: k8s_vip_80
+        health_check: "0"
+      - name: backend_blog
+        description: "blog backend pool — K8s MetalLB VIP (managed by Ansible)"
+        server: k8s_vip_80
+        health_check: "0"
+      - name: backend_business
+        description: "business backend pool — K8s MetalLB VIP (managed by Ansible)"
+        server: k8s_vip_80
+        health_check: "0"
+
+    # Host-match ACLs
+    public_host_acls:
+      - name: acl_is_gitlab
+        description: "Match gitlab.stefan-strich.de (managed by Ansible)"
+        expression: hdr
+        hdr: "gitlab.stefan-strich.de"
+      - name: acl_is_cloud
+        description: "Match cloud.stefan-strich.de (managed by Ansible)"
+        expression: hdr
+        hdr: "cloud.stefan-strich.de"
+      - name: acl_is_www
+        description: "Match www.stefan-strich.de (managed by Ansible)"
+        expression: hdr
+        hdr: "www.stefan-strich.de"
+      - name: acl_is_blog
+        description: "Match blog.stefan-strich.de (managed by Ansible)"
+        expression: hdr
+        hdr: "blog.stefan-strich.de"
+      - name: acl_is_business
+        description: "Match business.stefan-strich.de (managed by Ansible)"
+        expression: hdr
+        hdr: "business.stefan-strich.de"
+
+    # Path-match ACLs (for CalDAV/CardDAV redirects on Nextcloud)
+    public_path_acls:
+      - name: acl_is_carddav
+        description: "Match /.well-known/carddav path (managed by Ansible)"
+        expression: path
+        path: "/.well-known/carddav"
+      - name: acl_is_caldav
+        description: "Match /.well-known/caldav path (managed by Ansible)"
+        expression: path
+        path: "/.well-known/caldav"
+
+    # ACL to exclude ACME challenge paths from HTTP→HTTPS redirect
+    public_acme_acl:
+      name: acl_is_acme_challenge
+      description: "Match /.well-known/acme-challenge/ path prefix (managed by Ansible)"
+      expression: path_beg
+      path_beg: "/.well-known/acme-challenge/"
+
+  module_defaults:
+    ansible.builtin.uri:
+      url_username: "{{ vault_opnsense_api_key }}"
+      url_password: "{{ vault_opnsense_api_secret }}"
+      force_basic_auth: true
+      validate_certs: "{{ opnsense_ssl_verify }}"
+      status_code: [200]
+
+  tasks:
+
+    # -------------------------------------------------------------------------
+    # 1. Verify os-haproxy plugin is installed
+    # -------------------------------------------------------------------------
+    - name: Check os-haproxy plugin is installed
+      ansible.builtin.uri:
+        url: "{{ _api }}/core/firmware/info"
+        method: GET
+      register: r_fw
+
+    - name: Fail if os-haproxy plugin is not installed
+      ansible.builtin.fail:
+        msg: >
+          Plugin 'os-haproxy' is not installed.
+          Install it: OPNsense UI → System → Firmware → Plugins → os-haproxy → +
+      when: >-
+        r_fw.json.package
+        | selectattr('name', 'equalto', 'os-haproxy')
+        | selectattr('installed', 'equalto', '1')
+        | list | length == 0
+
+    # -------------------------------------------------------------------------
+    # 2. Resolve HAProxy certificate IDs for all public certs
+    # The HAProxy frontend ssl_certificates field uses HAProxy-internal short
+    # hex IDs (NOT Trust store UUIDs). These are obtained from the getFrontend
+    # schema, which enumerates all available certs with their labels (descr).
+    # We match on the label (value) which for ACME certs is "<CN> (ACME Client)".
+    # -------------------------------------------------------------------------
+    - name: Get HAProxy frontend schema (to enumerate available cert IDs)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/getFrontend"
+        method: GET
+      register: r_haproxy_frontend_schema
+
+    - name: Fail if any required certificate is missing from HAProxy cert list
+      ansible.builtin.fail:
+        msg: >
+          Certificate '{{ item }}' not found in HAProxy ssl_certificates list.
+          Ensure the cert is in OPNsense Trust store and the HAProxy plugin sees it.
+      when: >-
+        r_haproxy_frontend_schema.json.frontend.ssl_certificates.values()
+        | selectattr('value', 'equalto', item)
+        | list | length == 0
+      loop: "{{ public_certs }}"
+
+    - name: Build cert ID map (cert label → HAProxy short hex ID)
+      ansible.builtin.set_fact:
+        _cert_uuid_map: >-
+          {{
+            _cert_uuid_map | default({}) | combine({
+              item: (
+                r_haproxy_frontend_schema.json.frontend.ssl_certificates
+                | dict2items
+                | selectattr('value.value', 'equalto', item)
+                | map(attribute='key') | first
+              )
+            })
+          }}
+      loop: "{{ public_certs }}"
+
+    - name: Build comma-separated cert IDs string for frontend
+      ansible.builtin.set_fact:
+        _all_cert_keys: "{{ public_certs | map('extract', _cert_uuid_map) | join(',') }}"
+
+    # -------------------------------------------------------------------------
+    # 3. Real servers
+    # -------------------------------------------------------------------------
+    - name: Search existing servers
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchServers"
+        method: GET
+      register: r_servers
+
+    - name: Set existing server names
+      ansible.builtin.set_fact:
+        _existing_servers: "{{ r_servers.json.rows | map(attribute='name') | list }}"
+
+    - name: Add servers
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addServer"
+        method: POST
+        body_format: json
+        body:
+          server:
+            enabled: "1"
+            name: "{{ item.name }}"
+            description: "{{ item.description }}"
+            address: "{{ item.address }}"
+            port: "{{ item.port }}"
+      loop: "{{ public_servers }}"
+      when: "item.name not in _existing_servers"
+
+    - name: Re-fetch servers for UUIDs
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchServers"
+        method: GET
+      register: r_servers_final
+
+    - name: Build server UUID map
+      ansible.builtin.set_fact:
+        _server_uuid_map: >-
+          {{
+            _server_uuid_map | default({}) | combine({
+              item.name: item.uuid
+            })
+          }}
+      loop: "{{ r_servers_final.json.rows }}"
+      when: "item.name in (public_servers | map(attribute='name') | list)"
+
+    # -------------------------------------------------------------------------
+    # 4. Backend pools
+    # -------------------------------------------------------------------------
+    - name: Search existing backends
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchBackends"
+        method: GET
+      register: r_backends
+
+    - name: Set existing backend names
+      ansible.builtin.set_fact:
+        _existing_backends: "{{ r_backends.json.rows | map(attribute='name') | list }}"
+
+    - name: Add backends
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addBackend"
+        method: POST
+        body_format: json
+        body:
+          backend:
+            enabled: "1"
+            name: "{{ item.name }}"
+            description: "{{ item.description }}"
+            mode: http
+            linkedServers: "{{ _server_uuid_map[item.server] }}"
+            healthCheckEnabled: "{{ item.health_check }}"
+      loop: "{{ public_backends }}"
+      when: "item.name not in _existing_backends"
+
+    - name: Re-fetch backends for UUIDs
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchBackends"
+        method: GET
+      register: r_backends_final
+
+    - name: Build backend UUID map
+      ansible.builtin.set_fact:
+        _backend_uuid_map: >-
+          {{
+            _backend_uuid_map | default({}) | combine({
+              item.name: item.uuid
+            })
+          }}
+      loop: "{{ r_backends_final.json.rows }}"
+      when: "item.name in (public_backends | map(attribute='name') | list)"
+
+    # -------------------------------------------------------------------------
+    # 5. ACLs — host match conditions
+    # -------------------------------------------------------------------------
+    - name: Search existing ACLs
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchAcls"
+        method: GET
+      register: r_acls
+
+    - name: Set existing ACL names
+      ansible.builtin.set_fact:
+        _existing_acls: "{{ r_acls.json.rows | map(attribute='name') | list }}"
+
+    - name: Add host-match ACLs
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAcl"
+        method: POST
+        body_format: json
+        body:
+          acl:
+            name: "{{ item.name }}"
+            description: "{{ item.description }}"
+            expression: "{{ item.expression }}"
+            hdr: "{{ item.hdr }}"
+            caseSensitive: "0"
+      loop: "{{ public_host_acls }}"
+      when: "item.name not in _existing_acls"
+
+    # -------------------------------------------------------------------------
+    # 5b. ACLs — path match conditions (CalDAV/CardDAV, ACME challenge)
+    # -------------------------------------------------------------------------
+    - name: Add path-match ACLs (CalDAV/CardDAV)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAcl"
+        method: POST
+        body_format: json
+        body:
+          acl:
+            name: "{{ item.name }}"
+            description: "{{ item.description }}"
+            expression: "{{ item.expression }}"
+            path: "{{ item.path }}"
+            caseSensitive: "0"
+      loop: "{{ public_path_acls }}"
+      when: "item.name not in _existing_acls"
+
+    - name: Add ACME challenge path-prefix ACL
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAcl"
+        method: POST
+        body_format: json
+        body:
+          acl:
+            name: "{{ public_acme_acl.name }}"
+            description: "{{ public_acme_acl.description }}"
+            expression: "{{ public_acme_acl.expression }}"
+            path_beg: "{{ public_acme_acl.path_beg }}"
+            caseSensitive: "0"
+      when: "public_acme_acl.name not in _existing_acls"
+
+    - name: Re-fetch ACLs for UUIDs
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchAcls"
+        method: GET
+      register: r_acls_final
+
+    - name: Build ACL UUID map
+      ansible.builtin.set_fact:
+        _acl_uuid_map: >-
+          {{
+            _acl_uuid_map | default({}) | combine({
+              item.name: item.uuid
+            })
+          }}
+      loop: "{{ r_acls_final.json.rows }}"
+      when: >-
+        item.name in (
+          (public_host_acls | map(attribute='name') | list) +
+          (public_path_acls | map(attribute='name') | list) +
+          [public_acme_acl.name]
+        )
+
+    # -------------------------------------------------------------------------
+    # 6. Actions — routing, header manipulation, redirects
+    #
+    # Action ordering in the frontend matters:
+    #   a. CalDAV/CardDAV redirects (path-based, before cloud routing)
+    #   b. Nextcloud request headers (X-Forwarded-*)
+    #   c. Nextcloud HSTS response header
+    #   d. use_backend routing for all 5 domains
+    #   e. HTTP→HTTPS redirect (added to port-80 frontend)
+    # -------------------------------------------------------------------------
+    - name: Search existing actions
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchActions"
+        method: GET
+      register: r_actions
+
+    - name: Set existing action names
+      ansible.builtin.set_fact:
+        _existing_actions: "{{ r_actions.json.rows | map(attribute='name') | list }}"
+
+    # --- CalDAV redirect (301) ---
+    # os-haproxy 5.1: the "redirect" sub-action of type "http-request" does NOT generate
+    # a valid HAProxy config line. Use type "custom" instead, which passes the value
+    # verbatim into the config. The custom field value IS the full HAProxy directive.
+    - name: Add action — redirect_caldav (301 to /remote.php/dav/)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: redirect_caldav
+            description: "Redirect /.well-known/caldav to Nextcloud DAV (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _acl_uuid_map['acl_is_caldav'] }}"
+            type: custom
+            custom: "http-request redirect location https://cloud.stefan-strich.de/remote.php/dav/ code 301"
+      when: "'redirect_caldav' not in _existing_actions"
+
+    # --- CardDAV redirect (301) ---
+    - name: Add action — redirect_carddav (301 to /remote.php/dav/)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: redirect_carddav
+            description: "Redirect /.well-known/carddav to Nextcloud DAV (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _acl_uuid_map['acl_is_carddav'] }}"
+            type: custom
+            custom: "http-request redirect location https://cloud.stefan-strich.de/remote.php/dav/ code 301"
+      when: "'redirect_carddav' not in _existing_actions"
+
+    # --- Nextcloud X-Forwarded-For request header ---
+    # type: http-request + http_request_action: set-header
+    - name: Add action — set_hdr_x_forwarded_for (Nextcloud)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: set_hdr_x_forwarded_for
+            description: "Set X-Forwarded-For for Nextcloud (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _acl_uuid_map['acl_is_cloud'] }}"
+            type: http-request
+            http_request_action: set-header
+            http_request_set_header_name: "X-Forwarded-For"
+            http_request_set_header_content: "%[src]"
+      when: "'set_hdr_x_forwarded_for' not in _existing_actions"
+
+    # --- Nextcloud X-Forwarded-Proto request header ---
+    - name: Add action — set_hdr_x_forwarded_proto (Nextcloud)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: set_hdr_x_forwarded_proto
+            description: "Set X-Forwarded-Proto for Nextcloud (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _acl_uuid_map['acl_is_cloud'] }}"
+            type: http-request
+            http_request_action: set-header
+            http_request_set_header_name: "X-Forwarded-Proto"
+            http_request_set_header_content: "https"
+      when: "'set_hdr_x_forwarded_proto' not in _existing_actions"
+
+    # --- Nextcloud X-Forwarded-Host request header ---
+    - name: Add action — set_hdr_x_forwarded_host (Nextcloud)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: set_hdr_x_forwarded_host
+            description: "Set X-Forwarded-Host for Nextcloud (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _acl_uuid_map['acl_is_cloud'] }}"
+            type: http-request
+            http_request_action: set-header
+            http_request_set_header_name: "X-Forwarded-Host"
+            http_request_set_header_content: "cloud.stefan-strich.de"
+      when: "'set_hdr_x_forwarded_host' not in _existing_actions"
+
+    # --- Nextcloud X-Forwarded-Port request header ---
+    - name: Add action — set_hdr_x_forwarded_port (Nextcloud)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: set_hdr_x_forwarded_port
+            description: "Set X-Forwarded-Port for Nextcloud (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _acl_uuid_map['acl_is_cloud'] }}"
+            type: http-request
+            http_request_action: set-header
+            http_request_set_header_name: "X-Forwarded-Port"
+            http_request_set_header_content: "443"
+      when: "'set_hdr_x_forwarded_port' not in _existing_actions"
+
+    # --- Nextcloud HSTS response header ---
+    # type: http-response + http_response_action: set-header
+    - name: Add action — set_resp_hsts (Nextcloud)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: set_resp_hsts
+            description: "Set HSTS response header for Nextcloud (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _acl_uuid_map['acl_is_cloud'] }}"
+            type: http-response
+            http_response_action: set-header
+            http_response_set_header_name: "Strict-Transport-Security"
+            http_response_set_header_content: "max-age=15552000; includeSubDomains; preload"
+      when: "'set_resp_hsts' not in _existing_actions"
+
+    # --- use_backend routing actions ---
+    - name: Add action — route_to_gitlab
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: route_to_gitlab
+            description: "Route gitlab.stefan-strich.de to backend_gitlab (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _acl_uuid_map['acl_is_gitlab'] }}"
+            type: use_backend
+            use_backend: "{{ _backend_uuid_map['backend_gitlab'] }}"
+      when: "'route_to_gitlab' not in _existing_actions"
+
+    - name: Add action — route_to_cloud
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: route_to_cloud
+            description: "Route cloud.stefan-strich.de to backend_cloud (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _acl_uuid_map['acl_is_cloud'] }}"
+            type: use_backend
+            use_backend: "{{ _backend_uuid_map['backend_cloud'] }}"
+      when: "'route_to_cloud' not in _existing_actions"
+
+    - name: Add action — route_to_www
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: route_to_www
+            description: "Route www.stefan-strich.de to backend_www (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _acl_uuid_map['acl_is_www'] }}"
+            type: use_backend
+            use_backend: "{{ _backend_uuid_map['backend_www'] }}"
+      when: "'route_to_www' not in _existing_actions"
+
+    - name: Add action — route_to_blog
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: route_to_blog
+            description: "Route blog.stefan-strich.de to backend_blog (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _acl_uuid_map['acl_is_blog'] }}"
+            type: use_backend
+            use_backend: "{{ _backend_uuid_map['backend_blog'] }}"
+      when: "'route_to_blog' not in _existing_actions"
+
+    - name: Add action — route_to_business
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: route_to_business
+            description: "Route business.stefan-strich.de to backend_business (managed by Ansible)"
+            testType: "if"
+            linkedAcls: "{{ _acl_uuid_map['acl_is_business'] }}"
+            type: use_backend
+            use_backend: "{{ _backend_uuid_map['backend_business'] }}"
+      when: "'route_to_business' not in _existing_actions"
+
+    # --- HTTP → HTTPS redirect action (unconditional, for port-80 frontend) ---
+    # Uses type: custom (see CalDAV note above — redirect sub-action is broken in os-haproxy 5.1).
+    - name: Add action — redirect_http_to_https (no condition — applies to all non-ACME traffic)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addAction"
+        method: POST
+        body_format: json
+        body:
+          action:
+            enabled: "1"
+            name: redirect_http_to_https
+            description: "Redirect HTTP to HTTPS if not ACME challenge (managed by Ansible)"
+            testType: "unless"
+            linkedAcls: "{{ _acl_uuid_map['acl_is_acme_challenge'] }}"
+            type: custom
+            custom: "http-request redirect location https://%[hdr(host)]%[path] code 301"
+      when: "'redirect_http_to_https' not in _existing_actions"
+
+    - name: Re-fetch actions for UUIDs
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchActions"
+        method: GET
+      register: r_actions_final
+
+    - name: Build action UUID map
+      ansible.builtin.set_fact:
+        _action_uuid_map: >-
+          {{
+            _action_uuid_map | default({}) | combine({
+              item.name: item.uuid
+            })
+          }}
+      loop: "{{ r_actions_final.json.rows }}"
+      when: >-
+        item.name in [
+          'redirect_caldav',
+          'redirect_carddav',
+          'set_hdr_x_forwarded_for',
+          'set_hdr_x_forwarded_proto',
+          'set_hdr_x_forwarded_host',
+          'set_hdr_x_forwarded_port',
+          'set_resp_hsts',
+          'route_to_gitlab',
+          'route_to_cloud',
+          'route_to_www',
+          'route_to_blog',
+          'route_to_business',
+          'redirect_http_to_https'
+        ]
+
+    # -------------------------------------------------------------------------
+    # 7. Frontend: public-https (port 443, TLS offload, SNI routing)
+    #
+    # linkedActions order matters — HAProxy evaluates them in sequence:
+    #   1. CalDAV/CardDAV redirects (must come before route_to_cloud to avoid
+    #      passing these requests to the Nextcloud container)
+    #   2. Nextcloud request header injections (X-Forwarded-*)
+    #   3. Nextcloud HSTS response header
+    #   4. use_backend routing rules
+    # -------------------------------------------------------------------------
+    - name: Search existing frontends
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/searchFrontends"
+        method: GET
+      register: r_frontends
+
+    - name: Set existing frontend names
+      ansible.builtin.set_fact:
+        _existing_frontends: "{{ r_frontends.json.rows | map(attribute='name') | list }}"
+
+    - name: Add frontend — public_https (port 443)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addFrontend"
+        method: POST
+        body_format: json
+        body:
+          frontend:
+            enabled: "1"
+            name: public_https
+            description: "Public HTTPS frontend — all domains, TLS offload (managed by Ansible)"
+            bind: "0.0.0.0:443"
+            mode: http
+            ssl_enabled: "1"
+            ssl_certificates: "{{ _all_cert_keys }}"
+            defaultBackend: "{{ _backend_uuid_map['backend_www'] }}"
+            linkedActions: >-
+              {{ [
+                _action_uuid_map['redirect_caldav'],
+                _action_uuid_map['redirect_carddav'],
+                _action_uuid_map['set_hdr_x_forwarded_for'],
+                _action_uuid_map['set_hdr_x_forwarded_proto'],
+                _action_uuid_map['set_hdr_x_forwarded_host'],
+                _action_uuid_map['set_hdr_x_forwarded_port'],
+                _action_uuid_map['set_resp_hsts'],
+                _action_uuid_map['route_to_gitlab'],
+                _action_uuid_map['route_to_cloud'],
+                _action_uuid_map['route_to_www'],
+                _action_uuid_map['route_to_blog'],
+                _action_uuid_map['route_to_business']
+              ] | join(',') }}
+      when: "'public_https' not in _existing_frontends"
+
+    # -------------------------------------------------------------------------
+    # 8. Frontend: public_http (port 80) — HTTP → HTTPS redirect
+    #
+    # If a port-80 frontend already exists (e.g. for ACME challenge handling),
+    # this task attaches the redirect_http_to_https action to it.
+    # If no port-80 frontend exists, one is created.
+    #
+    # NOTE: The ACME challenge action (if any) should already be present on this
+    # frontend from task-06. The redirect_http_to_https action uses `unless
+    # acl_is_acme_challenge` to avoid interfering with cert renewal.
+    # -------------------------------------------------------------------------
+    - name: Check if a port-80 frontend already exists
+      ansible.builtin.set_fact:
+        _existing_http_frontend: >-
+          {{ r_frontends.json.rows
+             | selectattr('bind', 'search', ':80')
+             | list | first | default({}) }}
+
+    - name: Attach redirect_http_to_https to existing port-80 frontend
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/setFrontend/{{ _existing_http_frontend.uuid }}"
+        method: POST
+        body_format: json
+        body:
+          frontend:
+            linkedActions: >-
+              {{
+                (
+                  (_existing_http_frontend.linkedActions | default(''))
+                    .split(',') | reject('equalto', '') | list
+                  + [_action_uuid_map['redirect_http_to_https']]
+                ) | join(',')
+              }}
+      when:
+        - _existing_http_frontend.uuid is defined
+        - >-
+          _action_uuid_map['redirect_http_to_https']
+          not in (_existing_http_frontend.linkedActions | default(''))
+
+    - name: Create port-80 frontend with HTTP→HTTPS redirect (if none existed)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/addFrontend"
+        method: POST
+        body_format: json
+        body:
+          frontend:
+            enabled: "1"
+            name: public_http
+            description: "Public HTTP frontend — redirect to HTTPS (managed by Ansible)"
+            bind: "0.0.0.0:80"
+            mode: http
+            ssl_enabled: "0"
+            linkedActions: "{{ _action_uuid_map['redirect_http_to_https'] }}"
+      when: _existing_http_frontend.uuid is not defined
+
+    # -------------------------------------------------------------------------
+    # 9. Enable HAProxy service + apply configuration
+    # -------------------------------------------------------------------------
+    - name: Enable HAProxy service
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/settings/set"
+        method: POST
+        body_format: json
+        body:
+          haproxy:
+            general:
+              enabled: "1"
+
+    - name: Apply HAProxy configuration (reconfigure)
+      ansible.builtin.uri:
+        url: "{{ _api }}/haproxy/service/reconfigure"
+        method: POST
+        body_format: json
+        body: {}
