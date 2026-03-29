@@ -1,0 +1,36 @@
+---
+# Security hardening configuration variables
+
+# Firewall settings
+ufw_default_policy:
+  incoming: deny
+  outgoing: allow
+
+ufw_allowed_ports:
+  - { port: 22, proto: tcp, comment: "SSH" }
+  - { port: 80, proto: tcp, comment: "HTTP" }
+  - { port: 443, proto: tcp, comment: "HTTPS" }
+
+# SSH hardening
+ssh_settings:
+  port: 22
+  max_auth_tries: 3
+  permit_root_login: "no"
+  password_authentication: "no"
+  pubkey_authentication: "yes"
+  x11_forwarding: "no"
+  use_dns: "no"
+  allow_agent_forwarding: "no"
+  allow_tcp_forwarding: "no"
+  max_sessions: 2
+  client_alive_interval: 300
+  client_alive_count_max: 2
+
+# Fail2ban settings
+fail2ban_enabled: true
+fail2ban_services:
+  - sshd
+
+# System security settings
+disable_core_dumps: true
+disable_ipv6: false

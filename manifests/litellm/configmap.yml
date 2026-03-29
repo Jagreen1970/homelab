@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: litellm
+data:
+  config.yaml: |
+    # Proxy server settings
+    server_settings:
+      port: 4000
+      host: 0.0.0.0
+
+    # Uncomment when you have set up keys
+    # environment_variables:
+    #  OPENAI_API_KEY: "${OPENAI_API_KEY}"
+    #  OPENAI_API_BASE: "${OPENAI_API_BASE}"

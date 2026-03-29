@@ -1,0 +1,32 @@
+version: "3.8"
+
+services:
+  gitlab:
+    image: gitlab/gitlab-ce:latest
+    container_name: gitlab
+    restart: always
+    hostname: "gitlab.home"
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'https://gitlab.stefan-strich.de'
+        gitlab_rails['gitlab_shell_ssh_port'] = 2222
+        nginx['listen_port'] = 80
+        nginx['listen_https'] = false
+
+        # Performance-Tuning
+        puma['worker_processes'] = 2
+        sidekiq['concurrency'] = 10
+        prometheus_monitoring['enable'] = false
+
+        # Log-Rotation
+        logging['logrotate_frequency'] = "daily"
+        logging['logrotate_size'] = "200M"
+    ports:
+      - "8080:80"
+      - "2222:22"
+    volumes:
+      - /volume1/docker/gitlab/config:/etc/gitlab
+      - /volume1/docker/gitlab/logs:/var/log/gitlab
+      - /volume1/docker/gitlab/data:/var/opt/gitlab
+    shm_size: "256m"
+    mem_limit: 6g

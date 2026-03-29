@@ -1,0 +1,65 @@
+---
+# Registers the Homelab CA in ArgoCD and connects the Nexus helm-lab repository.
+#
+# Prereqs:
+#   - ArgoCD deployed (k8s.argocd.up.yml)
+#   - homelab-ca.pem present at playbooks/kubernetes/files/homelab-ca.pem (task-05g)
+#   - 'argocd-reader' user created in Nexus UI (Administration → Security → Users)
+#   - Nexus vault filled: group_vars/all/nexus_vault.yml → ansible-vault encrypt
+#
+# Run:
+#   ansible-playbook -i inventory.yml playbooks/kubernetes/nexus.argocd.up.yml --ask-vault-pass
+
+- name: Integrate Nexus Helm repository with ArgoCD
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    nexus_helm_repo_url: "https://nexus.home/repository/helm-lab/"
+    nexus_helm_repo_name: homelab-nexus-helm
+    homelab_ca_cert: "{{ lookup('file', 'files/homelab-ca.pem') }}"
+
+  tasks:
+    - name: Patch argocd-tls-certs-cm — trust Homelab CA for nexus.home
+      kubernetes.core.k8s:
+        state: patched
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: argocd-tls-certs-cm
+            namespace: argocd
+          data:
+            nexus.home: "{{ homelab_ca_cert }}"
+
+    - name: Create ArgoCD repository Secret for Nexus helm-lab
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: nexus-helm-repo
+            namespace: argocd
+            labels:
+              argocd.argoproj.io/secret-type: repository
+          stringData:
+            type: helm
+            url: "{{ nexus_helm_repo_url }}"
+            name: "{{ nexus_helm_repo_name }}"
+            username: argocd-reader
+            password: "{{ vault_nexus_argocd_reader_password }}"
+
+    - name: Verify repository Secret exists
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: nexus-helm-repo
+        namespace: argocd
+      register: repo_secret_info
+
+    - name: Assert repository Secret was created
+      ansible.builtin.assert:
+        that: repo_secret_info.resources | length == 1
+        success_msg: "ArgoCD repository Secret 'nexus-helm-repo' is present"
+        fail_msg: "ArgoCD repository Secret 'nexus-helm-repo' not found"

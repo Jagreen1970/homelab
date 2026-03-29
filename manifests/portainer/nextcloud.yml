@@ -1,0 +1,84 @@
+version: "2"
+
+services:
+  mariadb:
+    container_name: mariadb
+    image: mariadb:11.2
+    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW --innodb-read-only-compressed=OFF
+    restart: always
+    volumes:
+      - /volume1/docker/mariadb:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=
+      - MYSQL_PASSWORD=
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nxtadm
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: pma
+    links:
+      - mariadb
+    environment:
+      PMA_HOST: mariadb
+      PMA_PORT: 3306
+      PMA_ARBITRARY: 1
+    restart: always
+    ports:
+      - 8081:80
+
+  redis:
+    image: redis:latest
+    container_name: redis
+    restart: always
+    volumes:
+      - redis:/var/lib/redis
+    ports:
+      - 6379:6379
+
+  nginx-proxy-manager:
+    container_name: nginx-proxy-manager
+    image: nginxproxymanager/nginx-proxy-manager-dev:pr-3121
+    restart: unless-stopped
+    ports:
+      - 4480:80
+      - 81:81
+      - 4443:443
+    volumes:
+      - /volume1/docker/nginx-proxy/data:/data
+      - /volume1/docker/nginx-proxy/letsencrypt:/etc/letsencrypt
+
+  nextcloud:
+    container_name: nextcloud
+    ports:
+      - 8082:80
+    links:
+      - mariadb
+    environment:
+      - PUID=1026
+      - PGID=100
+      - TZ=Europe/Berlin
+      - NEXTCLOUD_TRUSTED_DOMAINS=cloud.stefan-strich.de
+      - OVERWRITEHOST=cloud.stefan-strich.de
+      - OVERWRITEPROTOCOL=https
+    volumes:
+      - /volume1/docker/nextcloud/html:/var/www/html
+      - /volume1/docker/nextcloud/custom_apps:/var/www/html/custom_apps
+      - /volume1/docker/nextcloud/config:/var/www/html/config
+      - /volume1/docker/nextcloud/data:/var/www/html/data
+      - /volume1/docker/nextcloud/themes:/var/www/html/themes/
+    image: nextcloud
+    restart: always
+
+  nextcloud-appapi-dsp:
+    container_name: nextcloud-appapi-dsp
+    image: ghcr.io/nextcloud/nextcloud-appapi-dsp:release
+    restart: unless-stopped
+    privileged: true
+    environment:
+      - NC_HAPROXY_PASSWORD=
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  redis: # cache for nextcloud

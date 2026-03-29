@@ -1,0 +1,26 @@
+---
+# Nexus Repository OSS — Portainer stack definition
+#
+# Deploy via Portainer → Stacks → Add stack → paste this content
+# Or directly on zaphod: docker compose up -d
+#
+# Prerequisites on zaphod before deploying:
+#   mkdir -p /volume1/docker/nexus/data
+#   chown -R 200:200 /volume1/docker/nexus/data
+#
+# Nexus runs as UID 200 — the host data directory must be owned by that UID.
+
+version: "3.8"
+services:
+  nexus:
+    image: sonatype/nexus3:latest
+    container_name: nexus
+    restart: unless-stopped
+    ports:
+      - "18081:8081"    # Nexus UI + API (internal port is always 8081)
+      - "18082:18082"   # Docker Hub pull-through proxy repo
+      - "18083:18083"   # Local Docker hosted repo
+    volumes:
+      - /volume1/docker/nexus/data:/nexus-data
+    environment:
+      - INSTALL4J_ADD_VM_PARAMS=-Xms2g -Xmx2g -XX:MaxDirectMemorySize=3g

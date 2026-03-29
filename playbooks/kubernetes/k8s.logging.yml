@@ -1,0 +1,128 @@
+---
+- name: Load Kubernetes variables
+  hosts: disasterarea
+  tasks:
+    - name: Include Kubernetes variables
+      ansible.builtin.include_vars:
+        file: k8s_vars.yml
+
+- name: Deploy logging stack
+  hosts: disasterarea
+  become: true
+  remote_user: admin
+  gather_facts: false
+  vars:
+    helm_repo_name: grafana
+    helm_repo_url: https://grafana.github.io/helm-charts
+
+  tasks:
+    - name: Add Grafana Helm repository
+      kubernetes.core.helm_repository:
+        name: "{{ helm_repo_name }}"
+        repo_url: "{{ helm_repo_url }}"
+        state: present
+
+    - name: Create monitoring namespace
+      kubernetes.core.k8s:
+        name: "{{ logging_namespace }}"
+        api_version: v1
+        kind: Namespace
+        state: present
+
+    - name: Check if Loki stack is already deployed
+      kubernetes.core.k8s_info:
+        kind: StatefulSet
+        name: "{{ logging_release_name }}-loki"
+        namespace: "{{ logging_namespace }}"
+      register: loki_statefulset
+      failed_when: false
+
+    - name: Deploy or update Loki stack using Helm
+      kubernetes.core.helm:
+        name: "{{ logging_release_name }}"
+        chart_ref: "{{ helm_repo_name }}/loki-stack"
+        release_namespace: "{{ logging_namespace }}"
+        chart_version: "{{ logging_chart_version }}"
+        create_namespace: true
+        force: "{{ loki_statefulset.resources | length == 0 }}"
+        values:
+          loki:
+            persistence:
+              enabled: true
+              size: "{{ loki_storage_size }}"
+              storageClass: longhorn
+            config:
+              table_manager:
+                retention_deletes_enabled: true
+                retention_period: "{{ loki_retention_period }}"
+          promtail:
+            enabled: true
+          grafana:
+            enabled: true
+            adminPassword: "{{ lookup('env', 'GRAFANA_ADMIN_PASSWORD') | default('admin', true) }}"
+            persistence:
+              enabled: true
+              size: "{{ grafana_storage_size }}"
+              storageClass: longhorn
+            service:
+              type: NodePort
+              nodePort: "{{ grafana_node_port }}"
+              annotations: {}
+            securityContext:
+              runAsUser: 472
+              runAsGroup: 472
+              fsGroup: 472
+            env:
+              GF_SERVER_HTTP_PORT: 3000
+              GF_SERVER_PROTOCOL: http
+              GF_SERVER_DOMAIN: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] | default('localhost') }}"
+              GF_SERVER_ROOT_URL: "http://{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] | default('localhost') }}:{{ grafana_node_port }}"
+            datasources:
+              datasources.yaml:
+                apiVersion: 1
+                datasources:
+                  - name: Loki
+                    type: loki
+                    access: proxy
+                    url: http://{{ logging_release_name }}-loki:3100
+                    version: 1
+                    editable: false
+      failed_when: false
+
+    - name: Wait for Loki deployment to be ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: "{{ logging_release_name }}-loki"
+        namespace: "{{ logging_namespace }}"
+        wait: yes
+        wait_timeout: 300
+        wait_condition:
+          type: Available
+          status: "True"
+
+    - name: Wait for Grafana deployment to be ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: "{{ logging_release_name }}-grafana"
+        namespace: "{{ logging_namespace }}"
+        wait: yes
+        wait_timeout: 300
+        wait_condition:
+          type: Available
+          status: "True"
+
+    - name: Get Grafana service details
+      kubernetes.core.k8s_info:
+        kind: Service
+        name: "{{ logging_release_name }}-grafana"
+        namespace: "{{ logging_namespace }}"
+      register: grafana_service
+
+    - name: Display Grafana access information
+      debug:
+        msg:
+          - "Grafana is now available at:"
+          - "http://{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}:{{ grafana_node_port }}"
+          - "Default credentials:"
+          - "Username: admin"
+          - "Password: {{ lookup('env', 'GRAFANA_ADMIN_PASSWORD') | default('admin', true) }}" 

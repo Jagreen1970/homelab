@@ -1,0 +1,146 @@
+==================================
+Host: arthur (192.168.1.24)
+OS: Ubuntu 24.04
+Kernel: 6.8.0-106-generic
+Last boot: 2026-03-21 18:17:13
+Uptime: 0 days, \
+6 hours, \
+46 minutes
+==================================
+
+Time Information:
+  System time: 2026-03-21 18:17:18 CET\n  Hardware time: \n  NTP status: inactive\ninactive\nNo NTP service found\n  Time zone: Europe/Berlin
+
+CPU:
+  Count: 4\n  Model: Intel(R) N100\n  Frequency: 2899.939\n  Load averages:  0.30, 0.28, 0.17
+
+Memory:
+  Total: 15Gi Used: 706Mi Free: 13Gi Available: 14Gi
+
+Disk:
+  /dev/sda2 mounted on /: 468G total, 418G available (6% used)
+
+Network:
+  enp1s0: 192.168.1.24/24\n  wlp2s0: 192.168.1.165/24\n  docker0: 172.17.0.1/16
+
+Docker:
+  Containers running: 0\n  Images: 0\n  Docker Disk Usage:     Images: 0 of 0\n    Containers: 0 of 0
+
+Kubernetes:
+  Kubernetes version: \n  Node role: Kubernetes worker node
+
+System Temperature:
+  Temperature: 27°C
+
+
+=====================================================================
+
+==================================
+Host: disasterarea (192.168.1.166)
+OS: Ubuntu 24.04
+Kernel: 6.8.0-106-generic
+Last boot: 2026-03-21 18:17:13
+Uptime: 0 days, \
+6 hours, \
+46 minutes
+==================================
+
+Time Information:
+  System time: 2026-03-21 18:17:18 CET\n  Hardware time: \n  NTP status: inactive\ninactive\nNo NTP service found\n  Time zone: Europe/Berlin
+
+CPU:
+  Count: 4\n  Model: Intel(R) N100\n  Frequency: 2899.828\n  Load averages:  0.13, 0.17, 0.12
+
+Memory:
+  Total: 15Gi Used: 616Mi Free: 13Gi Available: 14Gi
+
+Disk:
+  /dev/mapper/ubuntu--vg-ubuntu--lv mounted on /: 98G total, 86G available (9% used)
+
+Network:
+  enp1s0: 192.168.1.166/24
+
+Docker:
+  Docker not installed
+
+Kubernetes:
+  Kubernetes not installed
+Kubernetes Resources:
+  No Kubernetes cluster access
+
+System Temperature:
+  Temperature: 53°C
+
+
+=====================================================================
+
+==================================
+Host: ford (192.168.1.76)
+OS: Ubuntu 24.04
+Kernel: 6.8.0-106-generic
+Last boot: 2026-03-21 18:17:13
+Uptime: 0 days, \
+6 hours, \
+46 minutes
+==================================
+
+Time Information:
+  System time: 2026-03-21 18:17:19 CET\n  Hardware time: \n  NTP status: inactive\ninactive\nNo NTP service found\n  Time zone: Europe/Berlin
+
+CPU:
+  Count: 4\n  Model: Intel(R) Celeron(R) N5105 @ 2.00GHz\n  Frequency: 2800.038\n  Load averages:  0.16, 0.15, 0.05
+
+Memory:
+  Total: 15Gi Used: 699Mi Free: 13Gi Available: 14Gi
+
+Disk:
+  /dev/sda2 mounted on /: 468G total, 415G available (7% used)
+
+Network:
+  enp1s0: 192.168.1.76/24\n  wlp2s0: 192.168.1.94/24\n  docker0: 172.17.0.1/16
+
+Docker:
+  Containers running: 0\n  Images: 0\n  Docker Disk Usage:     Images: 0 of 0\n    Containers: 0 of 0
+
+Kubernetes:
+  Kubernetes version: \n  Node role: Kubernetes worker node
+
+System Temperature:
+  Temperature: 27°C
+
+
+=====================================================================
+
+==================================
+Host: trillian (192.168.1.67)
+OS: Ubuntu 24.04
+Kernel: 6.8.0-106-generic
+Last boot: 2026-03-21 18:17:13
+Uptime: 0 days, \
+6 hours, \
+46 minutes
+==================================
+
+Time Information:
+  System time: 2026-03-21 18:17:19 CET\n  Hardware time: \n  NTP status: inactive\ninactive\nNo NTP service found\n  Time zone: Europe/Berlin
+
+CPU:
+  Count: 4\n  Model: Intel(R) Celeron(R) N5105 @ 2.00GHz\n  Frequency: 2800.000\n  Load averages:  0.21, 0.14, 0.06
+
+Memory:
+  Total: 11Gi Used: 679Mi Free: 9.8Gi Available: 10Gi
+
+Disk:
+  /dev/sda2 mounted on /: 233G total, 195G available (12% used)
+
+Network:
+  enp1s0: 192.168.1.67/24\n  wlp2s0: 192.168.1.145/24\n  docker0: 172.17.0.1/16
+
+Docker:
+  Containers running: 0\n  Images: 0\n  Docker Disk Usage:     Images: 0 of 0\n    Containers: 0 of 0
+
+Kubernetes:
+  Kubernetes version: \n  Node role: Kubernetes worker node
+
+System Temperature:
+  Temperature: 27°C

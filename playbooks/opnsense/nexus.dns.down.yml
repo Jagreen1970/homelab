@@ -1,0 +1,40 @@
+---
+# Removes Unbound DNS host overrides created by nexus.dns.up.yml.
+#
+# Run:
+#   ansible-playbook -i inventory.yml playbooks/opnsense/nexus.dns.down.yml
+
+- name: Remove Unbound DNS host overrides for Nexus registry
+  hosts: opnsense
+  gather_facts: false
+
+  vars_files:
+    - opnsense_vars.yml
+
+  vars:
+    opnsense_credentials: &opnsense_credentials
+      firewall: "{{ opnsense_host }}"
+      api_port: "{{ opnsense_port }}"
+      api_key: "{{ vault_opnsense_api_key }}"
+      api_secret: "{{ vault_opnsense_api_secret }}"
+      ssl_verify: "{{ opnsense_ssl_verify }}"
+
+    nexus_dns_hosts:
+      - hostname: nexus
+        domain: home
+      - hostname: docker
+        domain: home
+      - hostname: docker-proxy
+        domain: home
+
+  tasks:
+    - name: Remove Unbound host override — {{ item.hostname }}.{{ item.domain }}
+      ansibleguy.opnsense.unbound_host:
+        <<: *opnsense_credentials
+        hostname: "{{ item.hostname }}"
+        domain: "{{ item.domain }}"
+        match_fields: [hostname, domain]
+        state: absent
+      loop: "{{ nexus_dns_hosts }}"
+      loop_control:
+        label: "{{ item.hostname }}.{{ item.domain }}"

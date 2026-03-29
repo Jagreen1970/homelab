@@ -1,0 +1,266 @@
+---
+# Kubernetes cluster upgrade playbook
+# Usage: set k8s_target_version in k8s_vars.yml, then run one pass at a time:
+#   1.28 → 1.29 → 1.30 → 1.31 → 1.32
+# Run: ansible-playbook -i inventory.yml playbooks/kubernetes/k8s.upgrade.yml -K
+
+- name: Load Kubernetes variables
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Include Kubernetes variables
+      ansible.builtin.include_vars:
+        file: k8s_vars.yml
+
+    - name: Derive target minor version for apt repository URL
+      ansible.builtin.set_fact:
+        k8s_minor_version: "{{ k8s_target_version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}"
+
+    - name: Show upgrade target
+      ansible.builtin.debug:
+        msg: "Upgrading cluster to Kubernetes {{ k8s_target_version }} (repo: v{{ k8s_minor_version }})"
+      run_once: true
+
+- name: Update apt repository and unhold Kubernetes packages on all nodes
+  hosts: all
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Unhold Kubernetes packages
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: install
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    - name: Download Kubernetes GPG key for target version
+      ansible.builtin.get_url:
+        url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_minor_version }}/deb/Release.key"
+        dest: /tmp/kubernetes.key
+        mode: '0644'
+        force: true
+
+    - name: Dearmor GPG key
+      ansible.builtin.shell: |
+        set -o pipefail
+        cat /tmp/kubernetes.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes.gpg
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Set permissions for GPG key
+      ansible.builtin.file:
+        path: /etc/apt/keyrings/kubernetes.gpg
+        mode: '0644'
+
+    - name: Update Kubernetes apt repository to target minor version
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v{{ k8s_minor_version }}/deb/ /"
+        filename: kubernetes
+        state: present
+        update_cache: true
+
+- name: Upgrade Kubernetes control plane
+  hosts: k8s_control_plane
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Include Kubernetes variables
+      ansible.builtin.include_vars:
+        file: k8s_vars.yml
+
+    - name: Derive target minor version
+      ansible.builtin.set_fact:
+        k8s_minor_version: "{{ k8s_target_version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}"
+
+    - name: Upgrade kubeadm on control plane
+      ansible.builtin.apt:
+        name: "kubeadm={{ k8s_target_version }}-*"
+        state: present
+        update_cache: false
+        allow_downgrade: true
+
+    - name: Run kubeadm upgrade plan (sanity check)
+      ansible.builtin.command: "kubeadm upgrade plan v{{ k8s_target_version }}"
+      register: upgrade_plan
+      changed_when: false
+      failed_when: upgrade_plan.rc != 0
+
+    - name: Show upgrade plan output
+      ansible.builtin.debug:
+        var: upgrade_plan.stdout_lines
+
+    - name: Apply kubeadm upgrade
+      ansible.builtin.command: "kubeadm upgrade apply v{{ k8s_target_version }} --yes"
+      register: upgrade_apply
+      changed_when: upgrade_apply.rc == 0
+      failed_when: upgrade_apply.rc != 0
+
+    - name: Show upgrade apply output
+      ansible.builtin.debug:
+        var: upgrade_apply.stdout_lines
+
+    - name: Upgrade kubelet and kubectl on control plane
+      ansible.builtin.apt:
+        name:
+          - "kubelet={{ k8s_target_version }}-*"
+          - "kubectl={{ k8s_target_version }}-*"
+        state: present
+        update_cache: false
+        allow_downgrade: true
+
+    - name: Restart kubelet on control plane
+      ansible.builtin.service:
+        name: kubelet
+        state: restarted
+        daemon_reload: true
+
+    - name: Re-hold Kubernetes packages on control plane
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    - name: Wait for control plane node to be Ready
+      ansible.builtin.command: >
+        kubectl wait node/disasterarea
+        --for=condition=Ready --timeout=120s
+      register: cp_ready
+      changed_when: false
+      failed_when: cp_ready.rc != 0
+
+- name: Upgrade worker nodes sequentially
+  hosts: k8s_workers
+  become: true
+  remote_user: admin
+  serial: 1
+  tasks:
+    - name: Include Kubernetes variables
+      ansible.builtin.include_vars:
+        file: k8s_vars.yml
+
+    - name: Derive target minor version
+      ansible.builtin.set_fact:
+        k8s_minor_version: "{{ k8s_target_version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}"
+
+    - name: Drain worker node
+      ansible.builtin.command: >
+        kubectl drain {{ inventory_hostname }}
+        --ignore-daemonsets
+        --delete-emptydir-data
+        --timeout=300s
+      delegate_to: disasterarea
+      become: true
+      register: drain_result
+      changed_when: drain_result.rc == 0
+      failed_when: drain_result.rc != 0
+
+    - name: Upgrade kubeadm on worker
+      ansible.builtin.apt:
+        name: "kubeadm={{ k8s_target_version }}-*"
+        state: present
+        update_cache: false
+        allow_downgrade: true
+
+    - name: Upgrade node configuration
+      ansible.builtin.command: kubeadm upgrade node
+      register: node_upgrade
+      changed_when: node_upgrade.rc == 0
+      failed_when: node_upgrade.rc != 0
+
+    - name: Upgrade kubelet and kubectl on worker
+      ansible.builtin.apt:
+        name:
+          - "kubelet={{ k8s_target_version }}-*"
+          - "kubectl={{ k8s_target_version }}-*"
+        state: present
+        update_cache: false
+        allow_downgrade: true
+
+    - name: Restart kubelet on worker
+      ansible.builtin.service:
+        name: kubelet
+        state: restarted
+        daemon_reload: true
+
+    - name: Re-hold Kubernetes packages on worker
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    - name: Uncordon worker node
+      ansible.builtin.command: "kubectl uncordon {{ inventory_hostname }}"
+      delegate_to: disasterarea
+      become: true
+      register: uncordon_result
+      changed_when: uncordon_result.rc == 0
+      failed_when: uncordon_result.rc != 0
+
+    - name: Wait for worker node to be Ready
+      ansible.builtin.command: >
+        kubectl wait node/{{ inventory_hostname }}
+        --for=condition=Ready --timeout=300s
+      delegate_to: disasterarea
+      become: true
+      register: worker_ready
+      changed_when: false
+      failed_when: worker_ready.rc != 0
+
+- name: Assert cluster health at target version
+  hosts: k8s_control_plane
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Include Kubernetes variables
+      ansible.builtin.include_vars:
+        file: k8s_vars.yml
+
+    - name: Get node status
+      ansible.builtin.command: kubectl get nodes -o wide
+      register: node_status
+      changed_when: false
+
+    - name: Show node status
+      ansible.builtin.debug:
+        var: node_status.stdout_lines
+
+    - name: Assert all nodes are at target version
+      ansible.builtin.command: >
+        kubectl get nodes
+        -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.nodeInfo.kubeletVersion}{"\n"}{end}'
+      register: node_versions
+      changed_when: false
+
+    - name: Fail if any node is not at target version
+      ansible.builtin.fail:
+        msg: "Node version mismatch detected. Expected v{{ k8s_target_version }}. Current versions:\n{{ node_versions.stdout }}"
+      when: >
+        node_versions.stdout_lines | select('search', 'v' + k8s_target_version) | list | length
+        != node_versions.stdout_lines | length
+
+    - name: Check for pods not in Running or Succeeded state
+      ansible.builtin.command: >
+        kubectl get pods -A
+        --field-selector=status.phase!=Running,status.phase!=Succeeded
+        --no-headers
+      register: stuck_pods
+      changed_when: false
+      failed_when: false
+
+    - name: Warn if stuck pods found
+      ansible.builtin.debug:
+        msg: "WARNING: Pods not in Running/Succeeded state:\n{{ stuck_pods.stdout }}"
+      when: stuck_pods.stdout | length > 0
+
+    - name: Cluster upgrade complete
+      ansible.builtin.debug:
+        msg: "Cluster successfully upgraded to Kubernetes {{ k8s_target_version }}"

@@ -1,0 +1,128 @@
+---
+# Security Hardening Playbook
+# This playbook implements security best practices for Ubuntu servers
+
+- name: Implement security hardening
+  hosts: all
+  remote_user: admin
+  become: true
+  
+  tasks:
+    - name: Include security variables
+      ansible.builtin.include_vars:
+        file: security_vars.yml
+        name: security_vars
+    
+    # Firewall configuration
+    - name: Install UFW (Uncomplicated Firewall)
+      ansible.builtin.apt:
+        name: ufw
+        state: present
+        update_cache: yes
+    
+    - name: Set UFW default policies
+      community.general.ufw:
+        state: enabled
+        default: "{{ security_vars.ufw_default_policy.incoming }}"
+        direction: incoming
+      
+    - name: Set UFW default outgoing policy
+      community.general.ufw:
+        state: enabled
+        default: "{{ security_vars.ufw_default_policy.outgoing }}"
+        direction: outgoing
+      
+    - name: Allow specific ports in UFW
+      community.general.ufw:
+        rule: allow
+        port: "{{ item.port }}"
+        proto: "{{ item.proto }}"
+        comment: "{{ item.comment }}"
+      loop: "{{ security_vars.ufw_allowed_ports }}"
+      
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
+      
+    # SSH hardening
+    - name: Configure SSH security settings
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?{{ item.key | regex_escape }} "
+        line: "{{ item.key }} {{ item.value }}"
+        state: present
+      loop: "{{ security_vars.ssh_settings | dict2items }}"
+      notify: Restart SSH service
+    
+    # Fail2ban installation and configuration
+    - name: Install Fail2ban
+      ansible.builtin.apt:
+        name: fail2ban
+        state: present
+      when: security_vars.fail2ban_enabled | bool
+
+    - name: Enable and start Fail2ban
+      ansible.builtin.service:
+        name: fail2ban
+        state: started
+        enabled: yes
+      when: security_vars.fail2ban_enabled | bool
+      
+    - name: Configure Fail2ban for SSH
+      ansible.builtin.template:
+        src: ../templates/jail.local.j2
+        dest: /etc/fail2ban/jail.local
+        owner: root
+        group: root
+        mode: 0644
+      when: security_vars.fail2ban_enabled | bool
+      notify: Restart Fail2ban service
+      
+    # System hardening
+    - name: Disable core dumps
+      ansible.builtin.lineinfile:
+        path: /etc/security/limits.conf
+        line: "* hard core 0"
+        state: present
+      when: security_vars.disable_core_dumps | bool
+      
+    - name: Set kernel parameters for security
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        sysctl_set: yes
+        reload: yes
+      loop:
+        - { key: "kernel.randomize_va_space", value: "2" }
+        - { key: "net.ipv4.conf.all.accept_redirects", value: "0" }
+        - { key: "net.ipv4.conf.default.accept_redirects", value: "0" }
+        - { key: "net.ipv4.conf.all.secure_redirects", value: "0" }
+        - { key: "net.ipv4.conf.default.secure_redirects", value: "0" }
+        - { key: "net.ipv4.conf.all.accept_source_route", value: "0" }
+        - { key: "net.ipv4.conf.default.accept_source_route", value: "0" }
+        - { key: "net.ipv4.icmp_echo_ignore_broadcasts", value: "1" }
+      
+    - name: Disable IPv6 if configured
+      ansible.posix.sysctl:
+        name: "{{ item }}"
+        value: "1"
+        state: present
+        sysctl_set: yes
+        reload: yes
+      with_items:
+        - net.ipv6.conf.all.disable_ipv6
+        - net.ipv6.conf.default.disable_ipv6
+        - net.ipv6.conf.lo.disable_ipv6
+      when: security_vars.disable_ipv6 | bool
+      
+  handlers:
+    - name: Restart SSH service
+      ansible.builtin.service:
+        name: ssh
+        state: restarted
+        
+    - name: Restart Fail2ban service
+      ansible.builtin.service:
+        name: fail2ban
+        state: restarted

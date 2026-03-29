@@ -1,0 +1,29 @@
+---
+# System Configuration Down Playbook
+# This playbook resets hostname, timezone, and locale settings
+
+- name: Reset system configuration
+  hosts: all
+  remote_user: admin
+  become: true
+  
+  tasks:
+    # Hostname reset removed - not configuring hostnames in up playbook
+        
+    - name: Reset timezone to UTC
+      community.general.timezone:
+        name: UTC
+        
+    - name: Reset NTP configuration
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/timesyncd.conf
+        regexp: '^NTP='
+        line: '#NTP='
+        state: present
+      notify: Restart timesyncd
+        
+  handlers:
+    - name: Restart timesyncd
+      ansible.builtin.service:
+        name: systemd-timesyncd
+        state: restarted

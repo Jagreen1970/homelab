@@ -1,0 +1,73 @@
+---
+# User Management Playbook
+# This playbook creates admin users, configures sudo access, and sets up SSH keys
+
+- name: Configure admin users and SSH access
+  hosts: all
+  become: true
+  
+  tasks:
+    - name: Read admin_vars from file
+      ansible.builtin.include_vars:
+        file: ../admin_vars.yml
+        name: admin_vars
+
+    - name: Ensure admin group exists
+      ansible.builtin.group:
+        name: "{{ admin_vars.admin_group }}"
+        state: present
+
+    - name: Create admin users
+      ansible.builtin.user:
+        name: "{{ item }}"
+        shell: /bin/bash
+        update_password: always
+        password: '!'
+        groups: "{{ admin_vars.admin_group }}"
+        append: true
+      with_items:
+        - "{{ admin_vars.admin_users }}"
+      
+    - name: Provide passwordless sudo rights to admin_group
+      community.general.sudoers:
+        name: allow-admin_users
+        group: "{{ admin_vars.admin_group }}"
+        state: present
+        nopassword: true
+        commands: ALL
+        
+    - name: Create SSH directory for admin users
+      ansible.builtin.file:
+        path: "/home/{{ item }}/.ssh"
+        state: directory
+        mode: 0700
+        owner: "{{ item }}"
+        group: "{{ item }}"
+      with_items:
+        - "{{ admin_vars.admin_users }}"
+      
+    - name: Set authorized keys for admin users
+      ansible.posix.authorized_key:
+        user: "{{ item }}"
+        key: "{{ lookup('file', '../../ssh_keys/' + item + '.pub') }}"
+        state: present
+      with_items:
+        - "{{ admin_vars.admin_users }}"
+      
+    - name: Secure SSH configuration
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        state: present
+      loop:
+        - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin no' }
+        - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+        - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes' }
+      notify: Restart SSH service
+      
+  handlers:
+    - name: Restart SSH service
+      ansible.builtin.service:
+        name: sshd
+        state: restarted

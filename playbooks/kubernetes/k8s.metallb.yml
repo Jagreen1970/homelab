@@ -1,0 +1,68 @@
+---
+# Playbook to install and configure MetalLB for the Kubernetes cluster
+- name: Install and configure MetalLB
+  hosts: localhost
+  vars_files:
+    - k8s_vars.yml
+
+  tasks:
+    - name: Apply MetalLB installation manifest
+      ansible.builtin.shell: |
+        kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.9/config/manifests/metallb-native.yaml
+      register: installation_result
+
+    - name: Wait for MetalLB controller deployment to be ready
+      ansible.builtin.shell: |
+        kubectl -n metallb-system wait --for=condition=available --timeout=300s deployment/controller
+      register: controller_ready
+      changed_when: false
+      failed_when: controller_ready.rc != 0
+
+    - name: Wait for MetalLB speaker daemonset to be ready
+      ansible.builtin.shell: |
+        kubectl -n metallb-system wait --for=condition=ready --timeout=300s pod -l app=metallb,component=speaker
+      register: speaker_ready
+      changed_when: false
+      failed_when: speaker_ready.rc != 0
+
+    - name: Apply MetalLB configuration (IP pool and L2 advertisement)
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ playbook_dir }}/../../manifests/k8s_cluster/metallb/metallb-config.yaml"
+      register: config_result
+
+    - name: Check if ingress-nginx namespace exists
+      ansible.builtin.command: kubectl get namespace ingress-nginx
+      register: ingress_ns
+      changed_when: false
+      failed_when: false
+
+    - name: Verify LoadBalancer service gets an IP
+      ansible.builtin.shell: |
+        kubectl patch svc ingress-nginx-controller -n ingress-nginx -p '{"spec":{"type":"LoadBalancer"}}'
+        sleep 10
+        kubectl get svc ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+      register: lb_ip
+      changed_when: lb_ip.stdout != ""
+      failed_when: lb_ip.rc != 0
+      when: ingress_ns.rc == 0
+
+    - name: Show the LoadBalancer IP
+      ansible.builtin.debug:
+        msg: "The ingress-nginx-controller LoadBalancer IP is: {{ lb_ip.stdout }}"
+      when: ingress_ns.rc == 0 and lb_ip.stdout != ""
+
+    - name: Verify MetalLB status
+      ansible.builtin.shell: |
+        kubectl get pods -n metallb-system
+        echo "---"
+        kubectl get ipaddresspools.metallb.io -n metallb-system
+        echo "---"
+        kubectl get l2advertisements.metallb.io -n metallb-system
+      register: status
+      changed_when: false
+      failed_when: status.rc != 0
+
+    - name: Display MetalLB status
+      ansible.builtin.debug:
+        msg: "{{ status.stdout_lines }}"

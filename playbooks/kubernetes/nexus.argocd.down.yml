@@ -1,0 +1,30 @@
+---
+# Removes the Nexus Helm repository from ArgoCD and removes the Homelab CA
+# entry from argocd-tls-certs-cm.
+#
+# Run:
+#   ansible-playbook -i inventory.yml playbooks/kubernetes/nexus.argocd.down.yml
+
+- name: Remove Nexus Helm repository from ArgoCD
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Delete ArgoCD repository Secret for Nexus helm-lab
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: Secret
+        name: nexus-helm-repo
+        namespace: argocd
+
+    - name: Remove nexus.home entry from argocd-tls-certs-cm
+      kubernetes.core.k8s_json_patch:
+        api_version: v1
+        kind: ConfigMap
+        name: argocd-tls-certs-cm
+        namespace: argocd
+        patch:
+          - op: remove
+            path: /data/nexus.home
+      ignore_errors: true  # key may not exist if already removed
