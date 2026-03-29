@@ -1,0 +1,260 @@
+---
+- name: Collect and report system resources
+  hosts: all
+  become: true
+  remote_user: admin
+  gather_facts: true
+
+  tasks:
+    - name: Gather memory info
+      ansible.builtin.shell: |
+        free -h | grep -i mem | awk '{print "  Total: " $2 " Used: " $3 " Free: " $4 " Available: " $7}'
+      register: memory_info
+      changed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Gather CPU info
+      ansible.builtin.shell: |
+        lscpu | grep "^CPU(s):" | awk '{print "  Count: " $2}'
+        grep "model name" /proc/cpuinfo | head -1 | sed 's/model name.*: /  Model: /'
+        grep "MHz" /proc/cpuinfo | head -1 | sed 's/cpu MHz.*: /  Frequency: /'
+        echo "  Load averages: $(uptime | awk -F'[a-z]:' '{print $2}')"
+      register: cpu_info
+      changed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Gather disk info
+      ansible.builtin.shell: |
+        df -h | grep -v "tmpfs\|udev\|boot\|snap" | grep "^/dev" | \
+          awk '{print "  " $1 " mounted on " $6 ": " $2 " total, " $4 " available (" $5 " used)"}'
+      register: disk_info
+      changed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Get Docker info (if installed)
+      ansible.builtin.shell: |
+        if command -v docker &> /dev/null; then
+          echo "  Containers running: $(docker ps -q | wc -l)"
+          echo "  Images: $(docker images -q | sort | uniq | wc -l)"
+          echo "  Docker Disk Usage: $(docker system df | grep "^Images\|^Containers\|^Volumes" | \
+            awk '{print "    " $1 ": " $3 " of " $2}')"
+        else
+          echo "  Docker not installed"
+        fi
+      register: docker_info
+      changed_when: false
+      failed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Check for K8s nodes and resources (on control node)
+      ansible.builtin.shell: |
+        if command -v kubectl &> /dev/null && kubectl get nodes &>/dev/null; then
+          echo "  Pods: $(kubectl get pods --all-namespaces 2>/dev/null | grep -v "NAMESPACE" | wc -l || echo "N/A")"
+          echo "  Deployments: $(kubectl get deployments --all-namespaces 2>/dev/null | \
+            grep -v "NAMESPACE" | wc -l || echo "N/A")"
+          echo "  PVs: $(kubectl get pv 2>/dev/null | grep -v "NAME" | wc -l || echo "N/A")"
+          echo "  PVCs: $(kubectl get pvc --all-namespaces 2>/dev/null | grep -v "NAMESPACE" | wc -l || echo "N/A")"
+
+          # Collect node information for all hosts
+          echo "WORKER_NODES:"
+          kubectl get nodes -o=jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -v "disasterarea" || echo "None"
+        else
+          echo "  No Kubernetes cluster access"
+        fi
+      register: k8s_resources
+      changed_when: false
+      failed_when: false
+      args:
+        executable: /bin/bash
+      run_once: true
+      delegate_to: disasterarea
+      become: false
+      delegate_facts: true
+
+    - name: Get Kubernetes info (if installed)
+      ansible.builtin.shell: |
+        if command -v kubectl &> /dev/null; then
+          K8S_VER=$(kubectl version --short 2>/dev/null | grep "Server" | awk '{print $3}' || echo "Not available")
+          echo "  Kubernetes version: $K8S_VER"
+          
+          # Check if this node is in the correct inventory group
+          if [[ "{{ inventory_hostname }}" == "disasterarea" ]]; then
+            echo "  Node role: Kubernetes control plane"
+          elif [[ "{{ inventory_hostname in groups['k8s_workers'] }}" == "True" ]]; then
+            echo "  Node role: Kubernetes worker node"
+          else
+            echo "  Node role: Not a Kubernetes node"
+          fi
+        else
+          echo "  Kubernetes not installed"
+        fi
+      register: k8s_info
+      changed_when: false
+      failed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Gather network info
+      ansible.builtin.shell: |
+        ip -4 addr show | grep -v "127.0.0.1" | grep "inet " | awk '{print "  " $NF ": " $2}'
+      register: network_info
+      changed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Get system temp and power info (if available)
+      ansible.builtin.shell: |
+        if [ -d /sys/class/thermal/thermal_zone0 ]; then
+          echo "  Temperature: $(($(cat /sys/class/thermal/thermal_zone0/temp) / 1000))°C"
+        else
+          echo "  Temperature: Not available"
+        fi
+      register: temp_info
+      changed_when: false
+      failed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Gather time information
+      ansible.builtin.shell: |
+        echo "  System time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+        echo "  Hardware time: $(hwclock --show)"
+        echo "  NTP status: $(systemctl is-active chronyd || systemctl is-active ntpd || echo "No NTP service found")"
+        echo "  Time zone: $(timedatectl show | grep Timezone | cut -d= -f2)"
+      register: time_info
+      changed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Generate report for each host
+      ansible.builtin.set_fact:
+        host_report: |
+          ==================================
+          Host: {{ ansible_hostname }} ({{ ansible_facts.default_ipv4.address }})
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Kernel: {{ ansible_kernel }}
+          Last boot: {{ ansible_date_time.date }} {{ ansible_date_time.time }}
+          Uptime: {{ ansible_uptime_seconds | int // 86400 }} days, \
+          {{ (ansible_uptime_seconds | int % 86400) // 3600 }} hours, \
+          {{ ((ansible_uptime_seconds | int % 86400) % 3600) // 60 }} minutes
+          ==================================
+
+          Time Information:
+          {{ time_info.stdout_lines | join('\n') }}
+
+          CPU:
+          {{ cpu_info.stdout_lines | join('\n') }}
+
+          Memory:
+          {{ memory_info.stdout_lines | join('\n') }}
+
+          Disk:
+          {{ disk_info.stdout_lines | join('\n') }}
+
+          Network:
+          {{ network_info.stdout_lines | join('\n') }}
+
+          Docker:
+          {{ docker_info.stdout_lines | join('\n') }}
+
+          Kubernetes:
+          {{ k8s_info.stdout_lines | join('\n') }}
+          {% if inventory_hostname in groups.get('k8s_control_plane', []) and ansible_facts.get('hostname') == 'disasterarea' %}
+          Kubernetes Resources:
+          {{ k8s_resources.stdout_lines | join('\n') }}
+          {% endif %}
+
+          System Temperature:
+          {{ temp_info.stdout_lines | join('\n') }}
+
+    - name: Create report directory
+      ansible.builtin.file:
+        path: /tmp/homelab_reports
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      become: false
+      # run_once: true - removing to comply with linting rules
+
+    - name: Write host report to local file
+      ansible.builtin.copy:
+        content: "{{ host_report }}"
+        dest: "/tmp/homelab_reports/{{ ansible_hostname }}_report.txt"
+        mode: '0644'
+      delegate_to: localhost
+      become: false
+
+    - name: Collect all host reports
+      ansible.builtin.assemble:
+        src: /tmp/homelab_reports/
+        dest: "{{ playbook_dir }}/../report.txt"
+        delimiter: "\n\n=====================================================================\n\n"
+        mode: '0644'
+      delegate_to: localhost
+      become: false
+      # run_once: true - removing to comply with linting rules
+
+    - name: Display combined report path
+      ansible.builtin.debug:
+        msg: "Complete homelab resource report has been saved to {{ playbook_dir }}/../report.txt"
+      delegate_to: localhost
+      become: false
+      # run_once: true - removing to comply with linting rules
+
+    - name: Generate summary report
+      ansible.builtin.set_fact:
+        summary: |
+          HOMELAB RESOURCE SUMMARY ({{ ansible_date_time.date }})
+          =====================================================================
+
+          {% for host in play_hosts | sort %}
+          {{ host }} ({{ hostvars[host]['ansible_facts']['default_ipv4']['address'] }}):
+            CPU: {{ hostvars[host]['ansible_processor_count'] }} x {{ hostvars[host]['ansible_processor_cores'] }} cores
+            RAM: {{ (hostvars[host]['ansible_memtotal_mb'] / 1024) | round(1) }}GB total / {{ (hostvars[host]['ansible_memfree_mb'] / 1024) | round(1) }}GB free
+            Disk: {% for mount in hostvars[host]['ansible_mounts'] %}{% if mount.device.startswith('/dev/') and not mount.mount.startswith('/boot') and mount.mount == '/' %}{{ (mount.size_total / 1073741824) | round(1) }}GB total / {{ (mount.size_available / 1073741824) | round(1) }}GB free on {{ mount.mount }}{% endif %}{% endfor %}
+
+          {% endfor %}
+
+          KUBERNETES NODES: {{ groups.get('k8s_workers', []) | length + groups.get('k8s_control_plane', []) | length }}
+          KUBERNETES CONTROL PLANES: {{ groups.get('k8s_control_plane', []) | length }}
+          KUBERNETES WORKERS: {{ groups.get('k8s_workers', []) | length }}
+          DOCKER HOSTS: {{ groups.get('docker_hosts', []) | length }}
+          STORAGE HOSTS: {{ groups.get('storage_hosts', []) | length }}
+
+          TOTAL COMPUTE CAPACITY:
+            CPU Cores: {{ play_hosts | map('extract', hostvars, ['ansible_processor_vcpus']) | map('int') | sum }}
+            RAM: {{ (play_hosts | map('extract', hostvars, ['ansible_memtotal_mb']) | map('int') | sum / 1024) | round(1) }}GB
+            Disk: {{ (play_hosts | map('extract', hostvars, ['ansible_mounts']) | flatten |
+                   selectattr('device', 'match', '^/dev/') |
+                   rejectattr('mount', 'match', '^/boot') |
+                   map(attribute='size_total') | map('int') | sum / 1073741824) | round(1) }}GB
+      delegate_to: localhost
+      become: false
+      # run_once: true - removing to comply with linting rules
+
+    - name: Write summary report to file
+      ansible.builtin.copy:
+        content: "{{ summary }}"
+        dest: "{{ playbook_dir }}/../resource_summary.txt"
+        mode: '0644'
+      delegate_to: localhost
+      become: false
+      # run_once: true - removing to comply with linting rules
+
+    - name: Display summary report
+      ansible.builtin.debug:
+        msg: "{{ summary.split('\n') }}"
+      delegate_to: localhost
+      become: false
+      # run_once: true - removing to comply with linting rules
+
+    - name: Display summary report path
+      ansible.builtin.debug:
+        msg: "Homelab resource summary has been saved to {{ playbook_dir }}/../resource_summary.txt"
+      delegate_to: localhost
+      become: false
+      # run_once: true - removing to comply with linting rules

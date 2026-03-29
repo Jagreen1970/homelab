@@ -1,0 +1,31 @@
+---
+- name: Disable WiFi interfaces on K8s worker nodes
+  hosts: k8s_workers
+  remote_user: admin
+  become: true
+
+  tasks:
+    - name: Ensure rfkill is installed
+      ansible.builtin.apt:
+        name: rfkill
+        state: present
+
+    - name: Ensure systemd-rfkill socket is enabled (persists rfkill state across reboots)
+      ansible.builtin.service:
+        name: systemd-rfkill.socket
+        enabled: true
+        state: started
+
+    - name: Block all WiFi radios
+      ansible.builtin.command:
+        cmd: rfkill block wifi
+      register: rfkill_result
+      changed_when: rfkill_result.rc == 0
+
+    - name: Bring WiFi interfaces down immediately
+      ansible.builtin.command:
+        cmd: ip link set dev {{ item }} down
+      loop: "{{ ansible_interfaces | select('match', '^wl') | list }}"
+      when: ansible_interfaces | select('match', '^wl') | list | length > 0
+      changed_when: true
+      ignore_errors: true

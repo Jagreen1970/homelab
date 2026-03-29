@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-disk-preparation
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: node-disk-preparation
+  template:
+    metadata:
+      labels:
+        name: node-disk-preparation
+    spec:
+      hostNetwork: true
+      hostPID: true
+      initContainers:
+      - name: format-and-prepare
+        image: alpine:3.15
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Preparing storage directory for Longhorn on $(hostname)"
+          mkdir -p /mnt/k8s-data/longhorn-storage
+          chmod 700 /mnt/k8s-data/longhorn-storage
+          echo "Storage directory prepared successfully" > /mnt/k8s-data/longhorn-storage/prep-complete
+          df -h | grep "/mnt/k8s-data"
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: host-root-volume
+          mountPath: /mnt/k8s-data
+          mountPropagation: Bidirectional
+      containers:
+      - name: sleep
+        image: k8s.gcr.io/pause:3.1
+      volumes:
+      - name: host-root-volume
+        hostPath:
+          path: /mnt/k8s-data

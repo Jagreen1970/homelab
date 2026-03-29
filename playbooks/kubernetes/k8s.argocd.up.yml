@@ -1,0 +1,54 @@
+---
+- name: Load Kubernetes Variables
+  hosts: localhost
+  tasks:
+    - name: Include Kubernetes variables
+      ansible.builtin.include_vars:
+        file: k8s_vars.yml
+
+- name: Deploy ArgoCD
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Create namespace
+      kubernetes.core.k8s:
+        name: argocd
+        kind: Namespace
+        api_version: v1
+        state: present
+  
+    - name: Download the ArgoCD installation manifest
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+        dest: "{{ playbook_dir }}/../../manifests/argocd/argocd-install.yaml"
+        mode: '0644'
+
+    - name: Install the ArgoCD installation manifest
+      kubernetes.core.k8s:
+        state: present
+        src: ../../manifests/argocd/argocd-install.yaml
+        namespace: argocd
+
+    - name: Apply ArgoCD ingress configuration for HTTPS
+      kubernetes.core.k8s:
+        state: present
+        src: ../../manifests/argocd/ingress-https.yaml
+        namespace: argocd
+
+    - name: Apply ArgoCD ingress configuration for gRPC
+      kubernetes.core.k8s:
+        state: present
+        src: ../../manifests/argocd/ingress-grpc.yaml
+        namespace: argocd
+
+    - name: Apply configmap for ArgoCD server
+      kubernetes.core.k8s:
+        state: present
+        src: ../../manifests/argocd/argocd-cmd-params-cm.yaml
+        namespace: argocd
+
+    - name: Restart the ArgoCD server deployment for the parameters to take effect
+      ansible.builtin.command:
+        cmd: kubectl rollout restart deployment/argocd-server -n argocd
+
+

@@ -1,0 +1,448 @@
+---
+- name: Load Kubernetes variables
+  hosts: all
+  tasks:
+    - name: Include Kubernetes variables
+      ansible.builtin.include_vars:
+        file: k8s_vars.yml
+
+- name: Prepare worker nodes for Longhorn
+  hosts: "arthur,ford,trillian"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Install required packages for Longhorn
+      ansible.builtin.apt:
+        name:
+          - open-iscsi
+          - nfs-common
+        state: present
+        update_cache: true
+
+    - name: Enable and start iscsid service
+      ansible.builtin.service:
+        name: iscsid
+        enabled: true
+        state: started
+
+    - name: Create Longhorn storage directory
+      ansible.builtin.file:
+        path: /mnt/k8s-data/longhorn-storage
+        state: directory
+        mode: '0700'
+        owner: root
+        group: root
+
+    - name: Check iscsid service status
+      ansible.builtin.command: systemctl status iscsid
+      register: iscsid_status
+      changed_when: false
+      failed_when: false
+
+    - name: Display iscsid status
+      ansible.builtin.debug:
+        var: iscsid_status.stdout_lines
+
+- name: Copy Longhorn manifests to control plane
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Create Longhorn and test manifests directories on control plane
+      ansible.builtin.file:
+        path: "/home/admin/manifests/k8s_cluster/{{ item }}"
+        state: directory
+        owner: admin
+        group: admin
+        mode: '0755'
+        recurse: true
+      loop:
+        - "longhorn"
+        - "test"
+
+    - name: Set Longhorn file list
+      ansible.builtin.set_fact:
+        longhorn_files:
+          - "longhorn-namespace.yaml"
+          - "longhorn-values.yaml"
+          - "longhorn-storage-class.yaml"
+          - "node-disk-preparation.yaml"
+          - "example-pvc.yaml"
+          - "longhorn-ingress.yaml"
+
+    - name: Copy Longhorn manifests to control plane
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../manifests/k8s_cluster/longhorn/{{ item }}"
+        dest: "/home/admin/manifests/k8s_cluster/longhorn/{{ item }}"
+        owner: admin
+        group: admin
+        mode: '0644'
+      loop: "{{ longhorn_files }}"
+      loop_control:
+        label: "longhorn/{{ item }}"
+
+    - name: Copy Longhorn test manifest to control plane
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../manifests/k8s_cluster/test/test-longhorn-storage.yaml"
+        dest: "/home/admin/manifests/k8s_cluster/test/test-longhorn-storage.yaml"
+        owner: admin
+        group: admin
+        mode: '0644'
+
+- name: Deploy Longhorn on Kubernetes cluster
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if kubectl is available
+      ansible.builtin.command: kubectl version --client
+      register: kubectl_check
+      changed_when: false
+      failed_when: false
+
+    - name: Set up kubectl config
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+      when: kubectl_check.rc == 0
+
+    - name: Read node disk preparation manifest
+      ansible.builtin.slurp:
+        src: /home/admin/manifests/k8s_cluster/longhorn/node-disk-preparation.yaml
+      register: disk_prep_encoded
+      when: admin_conf_stat.stat.exists | default(false)
+
+    - name: Prepare node disks for Longhorn
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ disk_prep_encoded['content'] | b64decode | from_yaml }}"
+      register: disk_prep_result
+      when: disk_prep_encoded is defined and disk_prep_encoded['content'] is defined
+
+    - name: Wait for disk preparation to complete
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: kube-system
+        label_selectors:
+          - name=node-disk-preparation
+        wait: yes
+        wait_timeout: 120
+        wait_condition:
+          type: Ready
+          status: "True"
+      register: disk_prep_wait
+      when: admin_conf_stat.stat.exists | default(false) and disk_prep_result is defined
+      failed_when: false
+
+    - name: Add Longhorn Helm repository
+      kubernetes.core.helm_repository:
+        name: longhorn
+        repo_url: https://charts.longhorn.io
+        state: present
+      register: helm_repo_add
+      when: admin_conf_stat.stat.exists | default(false)
+
+    - name: Create Longhorn namespace
+      kubernetes.core.k8s:
+        name: longhorn-system
+        api_version: v1
+        kind: Namespace
+        state: present
+      register: namespace_result
+      when: admin_conf_stat.stat.exists | default(false)
+
+    - name: Read Longhorn values file
+      ansible.builtin.slurp:
+        src: /home/admin/manifests/k8s_cluster/longhorn/longhorn-values.yaml
+      register: longhorn_values_encoded
+      when: admin_conf_stat.stat.exists | default(false)
+
+    - name: Set Longhorn values fact
+      ansible.builtin.set_fact:
+        longhorn_values: "{{ longhorn_values_encoded['content'] | b64decode | from_yaml }}"
+      when: longhorn_values_encoded is defined and longhorn_values_encoded['content'] is defined
+
+    - name: Check if Longhorn is already deployed
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: longhorn-ui
+        namespace: longhorn-system
+      register: longhorn_existing
+      failed_when: false
+      when: admin_conf_stat.stat.exists | default(false)
+
+    - name: Deploy Longhorn using Helm module
+      kubernetes.core.helm:
+        name: longhorn
+        chart_ref: longhorn/longhorn
+        release_namespace: longhorn-system
+        chart_version: 1.4.1
+        create_namespace: false
+        values: "{{ longhorn_values | default({}) }}"
+        wait: false
+        force: "{{ longhorn_existing.resources | default([]) | length == 0 }}"
+      register: longhorn_install_helm
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        namespace_result is defined and namespace_result.changed is not undefined
+      failed_when: false
+
+    - name: Wait for Longhorn UI deployment to be ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: longhorn-ui
+        namespace: longhorn-system
+        wait: yes
+        wait_timeout: 300
+        wait_condition:
+          type: Available
+          status: "True"
+      register: longhorn_ui_wait
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        longhorn_install_helm is defined
+      failed_when: false
+
+    - name: Check Longhorn deployment status
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: longhorn-system
+        label_selectors:
+          - app=longhorn-ui
+      register: longhorn_status
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        longhorn_ui_wait is defined
+
+    - name: Display Longhorn deployment status
+      ansible.builtin.debug:
+        msg: "{{ longhorn_status.resources | default([]) | map(attribute='metadata.name') | list }}"
+      when: longhorn_status.resources is defined
+
+    - name: Read Longhorn storage class manifest
+      ansible.builtin.slurp:
+        src: /home/admin/manifests/k8s_cluster/longhorn/longhorn-storage-class.yaml
+      register: storage_class_encoded
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        longhorn_status.resources is defined and longhorn_status.resources | length > 0
+
+    - name: Deploy Longhorn storage class
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ storage_class_encoded['content'] | b64decode | from_yaml }}"
+      register: storage_class_result
+      when: storage_class_encoded is defined and storage_class_encoded['content'] is defined
+        
+    - name: Read Longhorn ingress manifest
+      ansible.builtin.slurp:
+        src: /home/admin/manifests/k8s_cluster/longhorn/longhorn-ingress.yaml
+      register: ingress_encoded
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        longhorn_status.resources is defined and longhorn_status.resources | length > 0
+
+    - name: Deploy Longhorn ingress
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ ingress_encoded['content'] | b64decode | from_yaml }}"
+      register: ingress_result
+      when: ingress_encoded is defined and ingress_encoded['content'] is defined
+
+- name: Test Longhorn distributed storage
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if kubectl is available
+      ansible.builtin.command: kubectl version --client
+      register: kubectl_check
+      changed_when: false
+      failed_when: false
+
+    - name: Set up kubectl config
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+      when: kubectl_check.rc == 0
+
+    - name: Wait for Longhorn to be fully ready (additional wait)
+      ansible.builtin.shell: |
+        set -o pipefail
+        sleep 20  # Give Longhorn additional time to stabilize
+        kubectl -n longhorn-system wait --for=condition=ready pod -l app=longhorn-manager --timeout=60s || true
+      register: longhorn_stabilize
+      changed_when: false
+      when: admin_conf_stat.stat.exists | default(false)
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Check StorageClass existence
+      kubernetes.core.k8s_info:
+        kind: StorageClass
+        name: longhorn-distributed
+      register: storage_class_check
+      failed_when: false
+      when: admin_conf_stat.stat.exists | default(false)
+
+    - name: Display StorageClass status
+      ansible.builtin.debug:
+        msg: "StorageClass longhorn-distributed found"
+      when: storage_class_check.resources is defined and storage_class_check.resources | length > 0
+
+    - name: Read Longhorn test manifest
+      ansible.builtin.slurp:
+        src: /home/admin/manifests/k8s_cluster/test/test-longhorn-storage.yaml
+      register: test_manifest_encoded
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        storage_class_check.resources is defined and storage_class_check.resources | length > 0
+
+    - name: Run Longhorn test pod
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ test_manifest_encoded['content'] | b64decode | from_yaml_all | list }}"
+      register: test_longhorn_result
+      when: test_manifest_encoded is defined and test_manifest_encoded['content'] is defined
+
+    - name: Wait for Longhorn test pod to be ready
+      kubernetes.core.k8s_info:
+        kind: Pod
+        name: longhorn-storage-test
+        namespace: default
+        wait: yes
+        wait_timeout: 120
+        wait_condition:
+          type: Ready
+          status: "True"
+      register: test_pod_wait
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        test_longhorn_result is defined
+      failed_when: false
+
+    - name: Get pod content (exec in test pod)
+      kubernetes.core.k8s_exec:
+        namespace: default
+        pod: longhorn-storage-test
+        container: volume-test
+        command: cat /data/longhorn-test.txt
+      register: test_pod_result
+      when: >
+        admin_conf_stat.stat.exists | default(false) and
+        test_pod_wait.resources is defined and test_pod_wait.resources | length > 0
+      failed_when: false
+
+    - name: Display Longhorn test pod results
+      ansible.builtin.debug:
+        var: test_pod_result.stdout_lines
+      when: test_pod_result.stdout_lines is defined
+
+    - name: Check Longhorn volume status
+      kubernetes.core.k8s_info:
+        api_version: longhorn.io/v1beta1
+        kind: Volume
+        namespace: longhorn-system
+      register: longhorn_volumes
+      when: admin_conf_stat.stat.exists | default(false)
+      failed_when: false
+      
+    - name: Check Longhorn Ingress status
+      kubernetes.core.k8s_info:
+        kind: Ingress
+        name: longhorn-ingress
+        namespace: longhorn-system
+      register: longhorn_ingress
+      when: admin_conf_stat.stat.exists | default(false)
+      failed_when: false
+      
+    - name: Display Longhorn Ingress status
+      ansible.builtin.debug:
+        msg: "Longhorn Ingress: {{ 'Found' if longhorn_ingress.resources | length > 0 else 'Not found' }}"
+      when: longhorn_ingress is defined
+
+    - name: Display Longhorn volume status
+      ansible.builtin.debug:
+        msg: "Longhorn volumes: {{ longhorn_volumes.resources | default([]) | map(attribute='metadata.name') | list }}"
+      when: longhorn_volumes.resources is defined
+
+    - name: Ensure homelab directory exists
+      ansible.builtin.file:
+        path: "/home/admin/homelab"
+        state: directory
+        owner: admin
+        group: admin
+        mode: '0755'
+
+    - name: Generate Longhorn setup report
+      ansible.builtin.copy:
+        content: |
+          Longhorn Distributed Storage Setup Report
+          ========================================
+
+          Report generated on: {{ ansible_date_time.date }} {{ ansible_date_time.time }}
+
+          Longhorn System Status:
+          {% if longhorn_status.stdout is defined %}
+          {{ longhorn_status.stdout }}
+          {% else %}
+          No status information available
+          {% endif %}
+
+          Storage Classes:
+          {% if storage_class_check.stdout is defined %}
+          {{ storage_class_check.stdout }}
+          {% else %}
+          Storage class not found or not properly configured
+          {% endif %}
+
+          Longhorn Volumes:
+          {% if longhorn_volumes.stdout is defined %}
+          {{ longhorn_volumes.stdout }}
+          {% else %}
+          No volume information available
+          {% endif %}
+
+          Test Results:
+          {% if test_pod_result.stdout is defined %}
+          {{ test_pod_result.stdout }}
+          {% else %}
+          Test not run or failed
+          {% endif %}
+
+          Longhorn Configuration:
+          - Namespace: longhorn-system
+          - Default replica count: 3
+          - Storage directory on each node: /mnt/k8s-data/longhorn-storage
+          - Worker nodes: arthur, ford, trillian
+
+          Notes:
+          - Longhorn provides highly available persistent storage with data replication
+          - Use storageClassName: longhorn-distributed in PVCs to utilize Longhorn storage
+          - The Longhorn UI can be accessed via:
+            1. Ingress: http://longhorn.lab
+            2. Port-forwarding: kubectl port-forward -n longhorn-system service/longhorn-frontend 8000:80
+          - To access via hostname, add "longhorn.lab" to your hosts file
+
+          Troubleshooting:
+          {% if test_pod_result.rc is defined and test_pod_result.rc != 0 %}
+          - Test pod failed, check Longhorn manager logs with:
+            kubectl -n longhorn-system logs -l app=longhorn-manager
+          - Verify that open-iscsi is installed and running on all worker nodes
+          - Check that all nodes are properly registered in Longhorn
+          {% else %}
+          - Longhorn appears to be functioning correctly
+          {% endif %}
+        dest: /home/admin/homelab/longhorn-setup-report.txt
+        mode: '0644'
+
+    - name: Display Longhorn setup report
+      ansible.builtin.command: cat /home/admin/homelab/longhorn-setup-report.txt
+      register: setup_report
+      changed_when: false
+
+    - name: Show final Longhorn setup report
+      ansible.builtin.debug:
+        var: setup_report.stdout_lines
+      when: setup_report.stdout_lines is defined

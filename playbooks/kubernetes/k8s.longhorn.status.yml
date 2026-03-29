@@ -1,0 +1,215 @@
+---
+- name: Check Longhorn Status
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if kubectl is available
+      ansible.builtin.command: kubectl version --client
+      register: kubectl_check
+      changed_when: false
+      failed_when: false
+
+    - name: Set up kubectl config
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+      when: kubectl_check.rc == 0
+
+    # Namespace check
+    - name: Check Longhorn namespace
+      kubernetes.core.k8s_info:
+        kind: Namespace
+        name: longhorn-system
+      register: namespace_check
+      failed_when: false
+      when: admin_conf_stat.stat.exists | default(false)
+
+    - name: Display Longhorn namespace status
+      ansible.builtin.debug:
+        msg: "Longhorn namespace: {{ 'Found' if namespace_check.resources | default([]) | length > 0 else 'Not found' }}"
+      when: admin_conf_stat.stat.exists | default(false)
+
+    # Pods check
+    - name: Check Longhorn pods
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: longhorn-system
+      register: pods_check
+      failed_when: false
+      when: admin_conf_stat.stat.exists | default(false) and namespace_check.resources | default([]) | length > 0
+
+    - name: Display Longhorn pods status
+      ansible.builtin.debug:
+        msg: "Longhorn pods: {{ pods_check.resources | default([]) | map(attribute='metadata.name') | list }}"
+      when: pods_check.resources is defined
+
+    # Deployments check
+    - name: Check Longhorn deployments
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        namespace: longhorn-system
+      register: deployments_check
+      failed_when: false
+      when: admin_conf_stat.stat.exists | default(false) and namespace_check.resources | default([]) | length > 0
+
+    - name: Display Longhorn deployments status
+      ansible.builtin.debug:
+        msg: "Longhorn deployments: {{ deployments_check.resources | default([]) | map(attribute='metadata.name') | list }}"
+      when: deployments_check.resources is defined
+
+    # Services check
+    - name: Check Longhorn services
+      kubernetes.core.k8s_info:
+        kind: Service
+        namespace: longhorn-system
+      register: services_check
+      failed_when: false
+      when: admin_conf_stat.stat.exists | default(false) and namespace_check.resources | default([]) | length > 0
+
+    - name: Display Longhorn services status
+      ansible.builtin.debug:
+        msg: "Longhorn services: {{ services_check.resources | default([]) | map(attribute='metadata.name') | list }}"
+      when: services_check.resources is defined
+
+    # Storage class check
+    - name: Check Longhorn storage class
+      kubernetes.core.k8s_info:
+        kind: StorageClass
+        name: longhorn-distributed
+      register: storage_class_check
+      failed_when: false
+      when: admin_conf_stat.stat.exists | default(false)
+
+    - name: Display Longhorn storage class status
+      ansible.builtin.debug:
+        msg: "StorageClass longhorn-distributed: {{ 'Found' if storage_class_check.resources | default([]) | length > 0 else 'Not found' }}"
+      when: admin_conf_stat.stat.exists | default(false)
+
+    # Ingress check
+    - name: Check Longhorn ingress
+      kubernetes.core.k8s_info:
+        kind: Ingress
+        name: longhorn-ingress
+        namespace: longhorn-system
+      register: ingress_check
+      failed_when: false
+      when: admin_conf_stat.stat.exists | default(false) and namespace_check.resources | default([]) | length > 0
+
+    - name: Display Longhorn ingress status
+      ansible.builtin.debug:
+        msg: "Longhorn ingress: {{ 'Found' if ingress_check.resources | default([]) | length > 0 else 'Not found' }}"
+      when: ingress_check is defined
+
+    # Volume check
+    - name: Check Longhorn volumes
+      kubernetes.core.k8s_info:
+        api_version: longhorn.io/v1beta1
+        kind: Volume
+        namespace: longhorn-system
+      register: volumes_check
+      failed_when: false
+      when: admin_conf_stat.stat.exists | default(false) and namespace_check.resources | default([]) | length > 0
+
+    - name: Display Longhorn volumes status
+      ansible.builtin.debug:
+        msg: "Longhorn volumes: {{ volumes_check.resources | default([]) | map(attribute='metadata.name') | list }}"
+      when: volumes_check.resources is defined
+
+    # Recent events check
+    - name: Check recent events in Longhorn namespace
+      ansible.builtin.shell: |
+        KUBECONFIG=/etc/kubernetes/admin.conf kubectl get events -n longhorn-system --sort-by='.lastTimestamp' | tail -10
+      register: events_check
+      changed_when: false
+      failed_when: false
+      args:
+        executable: /bin/bash
+      when: admin_conf_stat.stat.exists | default(false) and namespace_check.resources | default([]) | length > 0
+
+    - name: Display recent Longhorn events
+      ansible.builtin.debug:
+        var: events_check.stdout_lines
+      when: events_check.stdout_lines is defined
+
+    # Optional test section
+    - name: Ask if test should be run
+      ansible.builtin.pause:
+        prompt: "Do you want to run a Longhorn storage test? (yes/no)"
+      register: run_test_prompt
+      when: admin_conf_stat.stat.exists | default(false) and storage_class_check.resources | default([]) | length > 0
+
+    - name: Set test flag
+      ansible.builtin.set_fact:
+        run_test: "{{ run_test_prompt.user_input | default('no') | lower == 'yes' }}"
+      when: run_test_prompt is defined
+
+    - name: Run Longhorn test
+      block:
+        - name: Apply test manifest
+          kubernetes.core.k8s:
+            state: present
+            src: /home/admin/manifests/k8s_cluster/test/test-longhorn-storage.yaml
+          register: test_apply
+          when: admin_conf_stat.stat.exists | default(false)
+
+        - name: Wait for test pod to be ready
+          kubernetes.core.k8s_info:
+            kind: Pod
+            name: longhorn-storage-test
+            namespace: default
+            wait: yes
+            wait_timeout: 120
+            wait_condition:
+              type: Ready
+              status: "True"
+          register: test_pod_wait
+          when: admin_conf_stat.stat.exists | default(false) and test_apply is defined
+          failed_when: false
+
+        - name: Get test pod content
+          kubernetes.core.k8s_exec:
+            namespace: default
+            pod: longhorn-storage-test
+            container: volume-test
+            command: cat /data/longhorn-test.txt
+          register: test_pod_result
+          when: >
+            admin_conf_stat.stat.exists | default(false) and
+            test_pod_wait.resources is defined and test_pod_wait.resources | length > 0
+          failed_when: false
+
+        - name: Display test pod results
+          ansible.builtin.debug:
+            var: test_pod_result.stdout_lines
+          when: test_pod_result.stdout_lines is defined
+
+        - name: Cleanup test resources
+          kubernetes.core.k8s:
+            state: absent
+            src: /home/admin/manifests/k8s_cluster/test/test-longhorn-storage.yaml
+          when: admin_conf_stat.stat.exists | default(false) and test_apply is defined
+      when: run_test is defined and run_test | bool
+
+    # Summary section
+    - name: Display Longhorn status summary
+      ansible.builtin.debug:
+        msg: |
+          ===== Longhorn Status Summary =====
+          
+          Namespace: {{ 'Found' if namespace_check.resources | default([]) | length > 0 else 'Not found' }}
+          Storage Class: {{ 'Found' if storage_class_check.resources | default([]) | length > 0 else 'Not found' }}
+          Ingress: {{ 'Found' if ingress_check.resources | default([]) | length > 0 else 'Not found' }}
+          
+          Deployments: {{ deployments_check.resources | default([]) | length }} found
+          Pods: {{ pods_check.resources | default([]) | length }} found
+          Services: {{ services_check.resources | default([]) | length }} found
+          Volumes: {{ volumes_check.resources | default([]) | length }} found
+          
+          Access Longhorn UI:
+          1. Via Ingress: http://longhorn.lab
+             Make sure to add 'longhorn.lab' to your hosts file
+          2. Via port-forwarding: kubectl port-forward -n longhorn-system service/longhorn-frontend 8000:80
+             Then open http://localhost:8000 in your browser
+      when: admin_conf_stat.stat.exists | default(false)
+

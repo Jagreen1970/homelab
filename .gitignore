@@ -1,0 +1,54 @@
+# Ansible
+*.retry
+*.pyc
+__pycache__/
+ansible.log
+
+# Secrets and local config
+vault_password_file
+.vault_pass
+*.vault
+secrets.yml
+*secret*
+*credentials*
+*.key
+*.pem
+
+# SSH keys - never commit these to version control
+ssh_keys/*
+!ssh_keys/.gitkeep
+
+# Environment
+.env
+.venv
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.sublime-*
+*.code-workspace
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temp files
+*~
+*.swp
+*.swo
+*.tmp
+*.bak
+.aider*
+
+# files that are downloaded
+argocd-install.yaml
+
+/prompts
+/CLAUDE.md

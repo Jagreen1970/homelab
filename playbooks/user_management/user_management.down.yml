@@ -1,0 +1,49 @@
+---
+# User Management Down Playbook
+# This playbook removes admin users and restores SSH settings to defaults
+
+- name: Remove admin user configuration
+  hosts: all
+  become: true
+  
+  tasks:
+    - name: Read admin_vars from file
+      ansible.builtin.include_vars:
+        file: ../admin_vars.yml
+        name: admin_vars
+
+    - name: Remove admin users
+      ansible.builtin.user:
+        name: "{{ item }}"
+        state: absent
+        remove: true
+      with_items:
+        - "{{ admin_vars.admin_users }}"
+    
+    - name: Remove admin sudoers entry
+      community.general.sudoers:
+        name: allow-admin_users
+        state: absent
+    
+    - name: Reset SSH configuration
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        state: present
+      loop:
+        - { regexp: '^PermitRootLogin no', line: '#PermitRootLogin prohibit-password' }
+        - { regexp: '^PasswordAuthentication no', line: '#PasswordAuthentication yes' }
+        - { regexp: '^PubkeyAuthentication yes', line: '#PubkeyAuthentication yes' }
+      notify: Restart SSH service
+      
+    - name: Remove admin group
+      ansible.builtin.group:
+        name: "{{ admin_vars.admin_group }}"
+        state: absent
+      
+  handlers:
+    - name: Restart SSH service
+      ansible.builtin.service:
+        name: sshd
+        state: restarted

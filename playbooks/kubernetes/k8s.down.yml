@@ -1,0 +1,147 @@
+---
+- name: Load Kubernetes variables
+  hosts: all
+  tasks:
+    - name: Include Kubernetes variables
+      ansible.builtin.include_vars:
+        file: k8s_vars.yml
+
+- name: Remove Kubernetes from worker nodes
+  hosts: "arthur,ford,trillian"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Drain the node
+      ansible.builtin.command: >
+        kubectl drain {{ inventory_hostname }} --ignore-daemonsets --delete-emptydir-data
+      delegate_to: "disasterarea"
+      register: drain_result
+      changed_when: drain_result.rc == 0
+      failed_when: drain_result.rc != 0 and "not found" not in drain_result.stderr
+      ignore_errors: true
+
+    - name: Delete node from cluster
+      ansible.builtin.command: >
+        kubectl delete node {{ inventory_hostname }}
+      delegate_to: "disasterarea"
+      register: delete_result
+      changed_when: delete_result.rc == 0
+      failed_when: delete_result.rc != 0 and "not found" not in delete_result.stderr
+      ignore_errors: true
+
+    - name: Reset kubeadm
+      ansible.builtin.command: kubeadm reset -f
+      register: reset_result
+      changed_when: reset_result.rc == 0
+      ignore_errors: true
+
+- name: Remove Kubernetes from control plane
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Remove Kubernetes dashboard
+      ansible.builtin.command: >
+        kubectl delete -f https://raw.githubusercontent.com/kubernetes/dashboard/{{ dashboard_version }}/aio/deploy/recommended.yaml
+      changed_when: true
+      ignore_errors: true
+
+    - name: Remove Flannel CNI
+      ansible.builtin.command: >
+        kubectl delete -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
+      changed_when: true
+      ignore_errors: true
+
+    - name: Reset kubeadm
+      ansible.builtin.command: kubeadm reset -f
+      register: reset_result
+      changed_when: reset_result.rc == 0
+      ignore_errors: true
+
+- name: Clean up all nodes
+  hosts: all
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Remove Kubernetes packages
+      ansible.builtin.apt:
+        name:
+          - kubeadm
+          - kubectl
+          - kubelet
+          - kubernetes-cni
+        state: absent
+        purge: true
+        allow_change_held_packages: true
+      ignore_errors: true
+
+    - name: Remove containerd
+      ansible.builtin.apt:
+        name: containerd.io
+        state: absent
+        purge: true
+      ignore_errors: true
+
+    - name: Remove CNI directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/cni/net.d
+        - /opt/cni
+        - /run/flannel
+        - /var/lib/cni
+        - /var/lib/kubelet
+        - /var/lib/etcd
+        - /var/lib/weave
+        - /etc/kubernetes
+        - /var/run/kubernetes
+        - /var/lib/calico
+        - /root/.kube
+        - "/home/admin/.kube"
+        - /root/dashboard-access.txt
+
+    - name: Remove Kubernetes repositories and keys
+      ansible.builtin.shell: "rm -f /etc/apt/sources.list.d/kubernetes.list
+        && rm -f /etc/apt/keyrings/kubernetes.gpg
+        && rm -f /usr/share/keyrings/kubernetes-archive-keyring.gpg"
+      args:
+        executable: /bin/bash
+      changed_when: true
+      ignore_errors: true
+
+    - name: Remove Docker repository and keys
+      ansible.builtin.shell: "rm -f /etc/apt/sources.list.d/docker.list
+        && rm -f /etc/apt/keyrings/docker.gpg
+        && rm -f /usr/share/keyrings/docker-archive-keyring.gpg"
+      args:
+        executable: /bin/bash
+      changed_when: true
+      ignore_errors: true
+
+    - name: Remove Kubernetes APT keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: absent
+      ignore_errors: true
+
+    - name: Remove sysctl settings
+      ansible.builtin.file:
+        path: /etc/sysctl.d/k8s.conf
+        state: absent
+
+    - name: Clean iptables
+      ansible.builtin.command: "{{ item }}"
+      loop:
+        - iptables -F
+        - iptables -t nat -F
+        - iptables -t mangle -F
+        - iptables -X
+      changed_when: true
+      ignore_errors: true
+
+    - name: Restart networking
+      ansible.builtin.service:
+        name: systemd-networkd
+        state: restarted
+      ignore_errors: true

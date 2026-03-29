@@ -1,0 +1,21 @@
+---
+# Tear down ingress-nginx
+- name: Remove ingress-nginx
+  hosts: localhost
+  vars_files:
+    - k8s_vars.yml
+
+  tasks:
+    - name: Delete ingress-nginx installation
+      ansible.builtin.shell: >
+        kubectl delete -f
+        https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v{{ ingress_nginx_version }}/deploy/static/provider/baremetal/deploy.yaml
+      register: delete_result
+      changed_when: delete_result.rc == 0
+      failed_when: delete_result.rc != 0 and "not found" not in delete_result.stderr
+
+    - name: Delete ingress-nginx namespace if still present
+      ansible.builtin.shell: kubectl delete namespace ingress-nginx --ignore-not-found
+      register: ns_delete
+      changed_when: "'deleted' in ns_delete.stdout"
+      failed_when: false

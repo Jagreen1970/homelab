@@ -1,0 +1,51 @@
+---
+# Adds Unbound DNS host overrides on OPNsense so that nexus.home, docker.home,
+# and docker-proxy.home all resolve to zaphod (the Nexus host).
+#
+# Prereqs:
+#   - OPNsense API enabled (System → Settings → Administration → Enable API)
+#   - API key/secret in group_vars/opnsense/vault.yml (ansible-vault)
+#   - ansibleguy.opnsense collection installed:
+#       ansible-galaxy collection install -r requirements.yml
+#
+# Run:
+#   ansible-playbook -i inventory.yml playbooks/opnsense/nexus.dns.up.yml
+
+- name: Add Unbound DNS host overrides for Nexus registry
+  hosts: opnsense
+  gather_facts: false
+
+  vars_files:
+    - opnsense_vars.yml
+
+  vars:
+    opnsense_credentials: &opnsense_credentials
+      firewall: "{{ opnsense_host }}"
+      api_port: "{{ opnsense_port }}"
+      api_key: "{{ vault_opnsense_api_key }}"
+      api_secret: "{{ vault_opnsense_api_secret }}"
+      ssl_verify: "{{ opnsense_ssl_verify }}"
+
+    nexus_dns_hosts:
+      - hostname: nexus
+        domain: home
+        description: Nexus UI
+      - hostname: docker
+        domain: home
+        description: Nexus local Docker registry
+      - hostname: docker-proxy
+        domain: home
+        description: Nexus Docker Hub pull-through proxy
+
+  tasks:
+    - name: Add Unbound host override — {{ item.hostname }}.{{ item.domain }}
+      ansibleguy.opnsense.unbound_host:
+        <<: *opnsense_credentials
+        hostname: "{{ item.hostname }}"
+        domain: "{{ item.domain }}"
+        value: "{{ opnsense_host }}"  # HAProxy on OPNsense terminates TLS and proxies to nexus_ip
+        description: "{{ item.description }} (managed by Ansible)"
+        state: present
+      loop: "{{ nexus_dns_hosts }}"
+      loop_control:
+        label: "{{ item.hostname }}.{{ item.domain }} → {{ opnsense_host }}"

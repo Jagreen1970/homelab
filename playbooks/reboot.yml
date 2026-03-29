@@ -1,0 +1,9 @@
+---
+- name: Reboot homelab
+  hosts: homelab
+  remote_user: admin
+  become: true
+
+  tasks:
+    - name: Reboot homelab
+      ansible.builtin.reboot:

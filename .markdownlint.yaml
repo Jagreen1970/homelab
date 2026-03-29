@@ -1,0 +1,49 @@
+# markdownlint configuration
+# Tuned for tutorial-style documentation with code blocks and ASCII diagrams.
+
+default: true
+
+# MD013: line length — disabled; tutorial prose and code comments exceed 80 chars
+MD013: false
+
+# MD040: fenced code blocks must have a language — disabled;
+# ASCII diagrams and plain text blocks don't have a meaningful language tag
+MD040: false
+
+# MD031: blank lines around fenced code blocks — disabled;
+# code blocks inside blockquotes (warnings/notes) can't always have surrounding blanks
+MD031: false
+
+# MD032: blank lines around lists — disabled; tight lists inside blockquotes
+MD032: false
+
+# MD060: table column style — disabled; mixed table styles are fine
+MD060: false
+
+# MD034: bare URLs — disabled; tutorials commonly include raw URLs in context
+MD034: false
+
+# MD022: blank lines around headings — disabled; tight heading/code-block sequences are fine
+MD022: false
+
+# MD049: emphasis style — prefer asterisks (*italic*) over underscores (_italic_)
+MD049:
+  style: "asterisk"
+
+# MD036: emphasis used as heading — disabled; **Cause A:** sub-labels are intentional
+MD036: false
+
+# MD047: single trailing newline — disabled; editors handle this inconsistently
+MD047: false
+
+# MD009: trailing spaces — disabled; common in prose-heavy docs
+MD009: false
+
+# MD029: ordered list prefix style — disabled; allow both 1/2/3 and 1/1/1 styles
+MD029: false
+
+# MD033: no inline HTML — disabled; occasionally useful in docs
+MD033: false
+
+# MD012: multiple consecutive blank lines — disabled; used for visual spacing
+MD012: false

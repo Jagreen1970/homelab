@@ -1,0 +1,502 @@
+---
+- name: Load Kubernetes variables
+  hosts: all
+  tasks:
+    - name: Include Kubernetes variables
+      ansible.builtin.include_vars:
+        file: k8s_vars.yml
+
+- name: Prepare hosts for Kubernetes
+  hosts: all
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Disable swap
+      ansible.builtin.command: swapoff -a
+      changed_when: false
+
+    - name: Remove swap from fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: '.*swap.*'
+        state: absent
+
+    - name: Fix sources list with direct deletion
+      ansible.builtin.shell: |
+        rm -f /etc/apt/sources.list.d/docker.list && \
+        rm -f /etc/apt/sources.list.d/kubernetes.list && \
+        rm -f /etc/apt/keyrings/docker* && \
+        rm -f /etc/apt/keyrings/kubernetes* && \
+        rm -f /etc/apt/trusted.gpg.d/docker* && \
+        rm -f /etc/apt/trusted.gpg.d/kubernetes* && \
+        rm -f /usr/share/keyrings/docker* && \
+        rm -f /usr/share/keyrings/kubernetes* && \
+        if [ -f /etc/apt/sources.list ]; then
+          sed -i '/docker/d' /etc/apt/sources.list
+          sed -i '/kubernetes/d' /etc/apt/sources.list
+        fi && \
+        find /etc/apt -type f -name '*.list' -exec sed -i '/docker/d' {} \; && \
+        find /etc/apt -type f -name '*.list' -exec sed -i '/kubernetes/d' {} \; && \
+        mkdir -p /etc/apt/keyrings && \
+        apt-get clean && \
+        (apt-get update --allow-insecure-repositories || true)
+      args:
+        executable: /bin/bash
+      changed_when: true
+      failed_when: false
+
+    - name: Load required kernel modules
+      ansible.builtin.command: "modprobe {{ item }}"
+      loop:
+        - overlay
+        - br_netfilter
+      changed_when: false
+
+    - name: Create k8s sysctl file
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/k8s.conf
+        content: |
+          net.bridge.bridge-nf-call-iptables = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward = 1
+        mode: '0644'
+
+    - name: Apply sysctl parameters
+      ansible.builtin.shell: |
+        sysctl --system && \
+        echo 1 > /proc/sys/net/bridge/bridge-nf-call-iptables && \
+        echo 1 > /proc/sys/net/bridge/bridge-nf-call-ip6tables && \
+        echo 1 > /proc/sys/net/ipv4/ip_forward
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Install required packages
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - python3-pip
+          - python3-kubernetes
+        state: present
+        update_cache: true
+
+- name: Reset stale Kubernetes state on worker nodes
+  hosts: "arthur,ford,trillian"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check for existing Kubernetes configuration
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf
+
+    - name: Reset kubeadm on workers with stale state
+      ansible.builtin.command: kubeadm reset --force
+      when: kubelet_conf.stat.exists
+      register: kubeadm_reset
+      changed_when: kubeadm_reset.rc == 0
+      failed_when: kubeadm_reset.rc != 0
+
+    - name: Remove stale CNI configuration
+      ansible.builtin.file:
+        path: /etc/cni/net.d
+        state: absent
+      when: kubelet_conf.stat.exists
+
+- name: Install containerd
+  hosts: all
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Create keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download Docker GPG key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /tmp/docker.gpg
+        mode: '0644'
+
+    - name: Dearmor GPG key
+      ansible.builtin.shell: |
+        set -o pipefail
+        cat /tmp/docker.gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Set permissions for the key
+      ansible.builtin.file:
+        path: /etc/apt/keyrings/docker.gpg
+        mode: '0644'
+
+    - name: Add Docker repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch={{ ansible_architecture | regex_replace('x86_64', 'amd64') | regex_replace('aarch64', 'arm64') }}
+          signed-by=/etc/apt/keyrings/docker.gpg]
+          https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+        filename: docker
+        state: present
+        update_cache: true
+
+    - name: Install containerd
+      ansible.builtin.apt:
+        name: containerd.io
+        state: present
+        update_cache: true
+
+    - name: Create containerd config directory
+      ansible.builtin.file:
+        path: /etc/containerd
+        state: directory
+        mode: '0755'
+
+    - name: Configure containerd for Kubernetes
+      ansible.builtin.copy:
+        dest: /etc/containerd/config.toml
+        content: |
+          version = 2
+          [plugins]
+            [plugins."io.containerd.grpc.v1.cri"]
+              sandbox_image = "registry.k8s.io/pause:3.9"
+              [plugins."io.containerd.grpc.v1.cri".containerd]
+                discard_unpacked_layers = true
+                [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
+                  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+                    runtime_type = "io.containerd.runc.v2"
+                    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+                      SystemdCgroup = true
+        mode: '0644'
+      changed_when: true
+
+    - name: Restart containerd
+      ansible.builtin.service:
+        name: containerd
+        state: restarted
+        enabled: true
+
+- name: Install Kubernetes packages
+  hosts: all
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Download Kubernetes GPG key
+      ansible.builtin.get_url:
+        url: https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key
+        dest: /tmp/kubernetes.key
+        mode: '0644'
+
+    - name: Dearmor GPG key
+      ansible.builtin.shell: |
+        set -o pipefail
+        cat /tmp/kubernetes.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes.gpg
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Set permissions for the key
+      ansible.builtin.file:
+        path: /etc/apt/keyrings/kubernetes.gpg
+        mode: '0644'
+
+    - name: Add Kubernetes repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
+        filename: kubernetes
+        state: present
+        update_cache: true
+
+    - name: Install Kubernetes components
+      ansible.builtin.apt:
+        name:
+          - "kubelet={{ k8s_version }}-*"
+          - "kubeadm={{ k8s_version }}-*"
+          - "kubectl={{ k8s_version }}-*"
+        state: present
+        update_cache: true
+        allow_downgrade: true
+
+    - name: Hold Kubernetes packages
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    - name: Enable kubelet service
+      ansible.builtin.service:
+        name: kubelet
+        enabled: true
+
+- name: Install Helm on control plane
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if Helm is already installed
+      ansible.builtin.command: helm version --short
+      register: helm_check
+      changed_when: false
+      failed_when: false
+
+    - name: Install Helm via official install script
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: helm_check.rc != 0
+
+- name: Initialize Kubernetes control plane
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Initialize Kubernetes cluster
+      ansible.builtin.command: >
+        kubeadm init
+        --pod-network-cidr={{ pod_network_cidr }}
+        --kubernetes-version={{ k8s_version }}
+      register: kubeadm_init
+      changed_when: kubeadm_init.rc == 0
+      failed_when: kubeadm_init.rc != 0 and "already exists" not in kubeadm_init.stderr
+
+    - name: Create .kube directory for root
+      ansible.builtin.file:
+        path: /root/.kube
+        state: directory
+        mode: '0700'
+
+    - name: Check if admin.conf exists
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+
+    - name: Copy admin.conf to root's kube config
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /root/.kube/config
+        remote_src: true
+        mode: '0600'
+      when: admin_conf_stat.stat.exists
+
+    - name: Create .kube directory for non-root user
+      ansible.builtin.file:
+        path: "/home/{{ ansible_user }}/.kube"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0700'
+
+    - name: Copy admin.conf to user's kube config
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "/home/{{ ansible_user }}/.kube/config"
+        remote_src: true
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0600'
+      when: admin_conf_stat.stat.exists
+
+    - name: Get join command
+      ansible.builtin.command: kubeadm token create --print-join-command
+      register: join_command_raw
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Set join command fact
+      ansible.builtin.set_fact:
+        join_command: "{{ join_command_raw.stdout | default('') }}"
+      when: join_command_raw is defined and join_command_raw.stdout is defined
+
+    - name: Install Flannel CNI network plugin
+      ansible.builtin.command: >
+        kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
+      changed_when: true
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Wait for nodes to be ready
+      ansible.builtin.command: kubectl get nodes
+      register: node_status
+      until: node_status.stdout.find("NotReady") == -1
+      retries: 20
+      delay: 15
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+- name: Fetch kubeconfig to local machine
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if admin.conf exists
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_fetch_stat
+
+    - name: Ensure ~/.kube directory exists on local machine
+      ansible.builtin.file:
+        path: "{{ lookup('env', 'HOME') }}/.kube"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+      when: admin_conf_fetch_stat.stat.exists
+
+    - name: Fetch kubeconfig from control plane to local machine
+      ansible.builtin.fetch:
+        src: /etc/kubernetes/admin.conf
+        dest: "{{ lookup('env', 'HOME') }}/.kube/config"
+        flat: true
+      when: admin_conf_fetch_stat.stat.exists
+
+    - name: Set kubeconfig permissions on local machine
+      ansible.builtin.file:
+        path: "{{ lookup('env', 'HOME') }}/.kube/config"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      when: admin_conf_fetch_stat.stat.exists
+
+- name: Join worker nodes to cluster
+  hosts: "arthur,ford,trillian"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Join nodes to the cluster
+      ansible.builtin.command: "{{ hostvars['disasterarea'].join_command }}"
+      register: join_result
+      changed_when: join_result.rc == 0
+      when: hostvars['disasterarea'].join_command is defined and hostvars['disasterarea'].join_command != ''
+      failed_when: false
+
+- name: Deploy Kubernetes Dashboard
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if admin.conf exists
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+
+    - name: Create dashboard namespace
+      ansible.builtin.command: >
+        kubectl create namespace {{ dashboard_namespace }} --dry-run=client -o yaml | kubectl apply -f -
+      changed_when: true
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Deploy Kubernetes Dashboard
+      ansible.builtin.command: >
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/{{ dashboard_version }}/aio/deploy/recommended.yaml
+      changed_when: true
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Create dashboard admin user
+      ansible.builtin.shell: |
+        set -o pipefail
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          name: admin-user
+          namespace: {{ dashboard_namespace }}
+        EOF
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Create admin cluster role binding
+      ansible.builtin.shell: |
+        set -o pipefail
+        cat <<EOF | kubectl apply -f -
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+          name: admin-user
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: ClusterRole
+          name: cluster-admin
+        subjects:
+        - kind: ServiceAccount
+          name: admin-user
+          namespace: {{ dashboard_namespace }}
+        EOF
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Create token for admin user
+      ansible.builtin.command: >
+        kubectl -n {{ dashboard_namespace }} create token admin-user --duration=8760h
+      register: dashboard_token
+      changed_when: true
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Display dashboard access token
+      ansible.builtin.debug:
+        var: dashboard_token.stdout
+      when: dashboard_token is defined and dashboard_token.stdout is defined
+      failed_when: false
+
+    - name: Create a local file with dashboard access info
+      ansible.builtin.copy:
+        content: |
+          Kubernetes Dashboard has been deployed.
+
+          To access the dashboard:
+          1. Run: kubectl proxy
+          2. Visit: http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/
+
+          Login with this token:
+          {{ dashboard_token.stdout | default('Token not available') }}
+
+          Note: This token is valid for 1 year. Generate a new one with:
+          kubectl -n {{ dashboard_namespace }} create token admin-user --duration=8760h
+        dest: /root/dashboard-access.txt
+        mode: '0600'
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Enable dashboard external access
+      ansible.builtin.command: >
+        kubectl patch svc kubernetes-dashboard -n {{ dashboard_namespace }} -p '{"spec": {"type": "NodePort"}}'
+      changed_when: true
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Get dashboard NodePort
+      ansible.builtin.command: >
+        kubectl get svc kubernetes-dashboard -n {{ dashboard_namespace }} -o jsonpath='{.spec.ports[0].nodePort}'
+      register: dashboard_port
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Display dashboard access URL
+      ansible.builtin.debug:
+        msg: "Dashboard available at: https://{{ ansible_host }}:{{ dashboard_port.stdout | default('port-not-available') }}"
+      when: dashboard_port is defined and dashboard_port.stdout is defined
+      failed_when: false

@@ -1,0 +1,621 @@
+---
+- name: Load Kubernetes variables
+  hosts: all
+  tasks:
+    - name: Include Kubernetes variables
+      ansible.builtin.include_vars:
+        file: k8s_vars.yml
+
+- name: Test Kubernetes cluster health
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if admin.conf exists
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+
+    - name: Check node status
+      ansible.builtin.command: kubectl get nodes -o wide
+      register: node_status
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+
+    - name: Display node status
+      ansible.builtin.debug:
+        var: node_status.stdout_lines
+      when: node_status is defined and node_status.stdout_lines is defined
+
+    - name: Check pod status across all namespaces
+      ansible.builtin.command: kubectl get pods --all-namespaces
+      register: pod_status
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+
+    - name: Display pod status
+      ansible.builtin.debug:
+        var: pod_status.stdout_lines
+      when: pod_status is defined and pod_status.stdout_lines is defined
+
+    - name: Check failed or pending pods
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pods --all-namespaces | grep -v "Running\|Completed" || echo "No failed or pending pods found"
+      register: failed_pods
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+      args:
+        executable: /bin/bash
+
+    - name: Display failed pods
+      ansible.builtin.debug:
+        var: failed_pods.stdout_lines
+      when: failed_pods is defined and failed_pods.stdout_lines is defined
+
+    - name: Check cluster info
+      ansible.builtin.command: kubectl cluster-info
+      register: cluster_info
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+
+    - name: Display cluster info
+      ansible.builtin.debug:
+        var: cluster_info.stdout_lines
+      when: cluster_info is defined and cluster_info.stdout_lines is defined
+
+    - name: Get API Server health
+      ansible.builtin.command: kubectl get --raw /healthz
+      register: api_health
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+
+    - name: Display API health status
+      ansible.builtin.debug:
+        msg: "API Server health: {{ api_health.stdout }}"
+      when: api_health is defined and api_health.stdout is defined
+
+- name: Run network tests
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if admin.conf exists
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+
+    - name: Ensure homelab directory exists
+      ansible.builtin.file:
+        path: "/home/admin/homelab"
+        state: directory
+        owner: admin
+        group: admin
+        mode: '0755'
+      when: admin_conf_stat.stat.exists
+
+    - name: Ensure manifests directory structure exists
+      ansible.builtin.file:
+        path: "/home/admin/homelab/manifests/k8s_cluster/test"
+        state: directory
+        mode: '0755'
+      when: admin_conf_stat.stat.exists
+
+    - name: Copy test manifests from repository
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../manifests/k8s_cluster/test/{{ item }}"
+        dest: "/home/admin/homelab/manifests/k8s_cluster/test/{{ item }}"
+        mode: '0644'
+        remote_src: false
+      loop:
+        - test-network.yaml
+        - test-deployment.yaml
+        - test-storage.yaml
+        - test-storage-pod.yaml
+        - test-storage-pvc.yaml
+        - test-nfs-storage.yaml
+        - test-longhorn-storage.yaml
+      when: admin_conf_stat.stat.exists
+
+    - name: Apply network test resources
+      ansible.builtin.command: kubectl apply -f /home/admin/homelab/manifests/k8s_cluster/test/test-network.yaml
+      register: network_apply
+      changed_when: true
+      when: admin_conf_stat.stat.exists
+
+    - name: Wait for network test pods to be ready
+      ansible.builtin.shell: |
+        kubectl -n network-test wait --for=condition=ready pod/network-test-1 pod/network-test-2 --timeout=120s
+      register: network_wait
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Test Pod to Pod connectivity
+      ansible.builtin.shell: |
+        set -o pipefail
+        # First try with FQDN
+        kubectl exec -it -n network-test network-test-1 -- curl -s network-test-2.network-test.pod.cluster.local |
+        grep -q "Welcome to nginx" && echo "Pod to Pod connectivity via FQDN: SUCCESS" || echo "Pod to Pod connectivity via FQDN: FAILED"
+
+        # Fallback to IP if FQDN fails
+        if [ $? -ne 0 ]; then
+          POD2_IP=$(kubectl get pod -n network-test network-test-2 -o jsonpath='{.status.podIP}')
+          kubectl exec -it -n network-test network-test-1 -- curl -s $POD2_IP |
+          grep -q "Welcome to nginx" && echo "Pod to Pod connectivity via IP: SUCCESS" || echo "Pod to Pod connectivity via IP: FAILED"
+        fi
+      register: pod_to_pod
+      changed_when: false
+      when: admin_conf_stat.stat.exists and network_wait.rc is defined and network_wait.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Display Pod to Pod connectivity results
+      ansible.builtin.debug:
+        var: pod_to_pod.stdout_lines
+      when: pod_to_pod is defined and pod_to_pod.stdout_lines is defined
+
+    - name: Test Pod to Service connectivity
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl exec -it -n network-test network-test-1 -- curl -s network-test-svc |
+        grep -q "Welcome to nginx" && echo "Pod to Service connectivity: SUCCESS" || echo "Pod to Service connectivity: FAILED"
+      register: pod_to_service
+      changed_when: false
+      when: admin_conf_stat.stat.exists and network_wait.rc is defined and network_wait.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Display Pod to Service connectivity results
+      ansible.builtin.debug:
+        var: pod_to_service.stdout_lines
+      when: pod_to_service is defined and pod_to_service.stdout_lines is defined
+
+    - name: Clean up network test resources
+      ansible.builtin.command: kubectl delete -f /home/admin/homelab/manifests/k8s_cluster/test/test-network.yaml
+      changed_when: true
+      when: admin_conf_stat.stat.exists and network_apply is defined and network_apply.rc is defined and network_apply.rc == 0
+      failed_when: false
+
+- name: Run storage tests
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if admin.conf exists
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+
+# Using the copied test manifests from repository
+
+    - name: Check if storage class exists
+      ansible.builtin.command: kubectl get storageclass local-storage
+      register: storage_class_exists
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Apply storage test resources
+      ansible.builtin.command: kubectl apply -f /home/admin/homelab/manifests/k8s_cluster/test/test-storage.yaml
+      register: storage_apply
+      changed_when: true
+      when: admin_conf_stat.stat.exists and storage_class_exists.rc is defined and storage_class_exists.rc == 0
+
+    - name: Wait for storage test pod to be ready (if storage class exists)
+      ansible.builtin.shell: |
+        kubectl wait --for=condition=ready pod/storage-test --timeout=30s || true
+      register: storage_wait
+      changed_when: false
+      when: admin_conf_stat.stat.exists and storage_class_exists.rc is defined and storage_class_exists.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Verify storage test results
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pod storage-test -o wide | grep Running &&
+        kubectl exec -it storage-test -- cat /data/test.txt |
+        grep -q "Storage test successful" && echo "Storage test: SUCCESS" || echo "Storage test: FAILED"
+      register: storage_result
+      changed_when: false
+      when: admin_conf_stat.stat.exists and storage_class_exists.rc is defined and storage_class_exists.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Display storage test results
+      ansible.builtin.debug:
+        var: storage_result.stdout_lines
+      when: storage_result is defined and storage_result.stdout_lines is defined
+
+    - name: Clean up storage test resources
+      ansible.builtin.command: kubectl delete -f /home/admin/homelab/manifests/k8s_cluster/test/test-storage.yaml
+      changed_when: true
+      when: admin_conf_stat.stat.exists and storage_apply is defined and storage_apply.rc is defined and storage_apply.rc == 0
+      failed_when: false
+
+- name: Run workload tests
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if admin.conf exists
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+
+# Using the copied test manifests from repository
+
+    - name: Apply deployment test resources
+      ansible.builtin.command: kubectl apply -f /home/admin/homelab/manifests/k8s_cluster/test/test-deployment.yaml
+      register: deployment_apply
+      changed_when: true
+      when: admin_conf_stat.stat.exists
+
+    - name: Wait for deployment to be ready
+      ansible.builtin.shell: |
+        kubectl wait --for=condition=available --timeout=60s deployment/test-deployment || true
+      register: deployment_wait
+      changed_when: false
+      when: admin_conf_stat.stat.exists and deployment_apply.rc is defined and deployment_apply.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Check deployment status
+      ansible.builtin.command: kubectl get deployment test-deployment
+      register: deployment_status
+      changed_when: false
+      when: admin_conf_stat.stat.exists and deployment_apply.rc is defined and deployment_apply.rc == 0
+
+    - name: Display deployment status
+      ansible.builtin.debug:
+        var: deployment_status.stdout_lines
+      when: deployment_status is defined and deployment_status.stdout_lines is defined
+
+    - name: Get test service NodePort
+      ansible.builtin.command: >
+        kubectl get svc test-service -o jsonpath='{.spec.ports[0].nodePort}'
+      register: test_service_port
+      changed_when: false
+      when: admin_conf_stat.stat.exists and deployment_apply.rc is defined and deployment_apply.rc == 0
+      failed_when: false
+
+    - name: Test service access (direct check)
+      ansible.builtin.shell: |
+        set -o pipefail
+        NODEPORT=$(kubectl get svc test-service -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "none") &&
+        if [ "$NODEPORT" != "none" ]; then
+          curl -s --connect-timeout 5 http://localhost:$NODEPORT |
+          grep -q "Welcome to nginx" && echo "Service access test: SUCCESS" || echo "Service access test: FAILED"
+        else
+          echo "Service access test: SKIPPED - No NodePort available"
+        fi
+      register: service_access
+      changed_when: false
+      when: admin_conf_stat.stat.exists and deployment_apply.rc is defined and deployment_apply.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Display service access test results
+      ansible.builtin.debug:
+        var: service_access.stdout_lines
+      when: service_access is defined and service_access.stdout_lines is defined
+
+    - name: Clean up deployment test resources
+      ansible.builtin.command: kubectl delete -f /home/admin/homelab/manifests/k8s_cluster/test/test-deployment.yaml
+      changed_when: true
+      when: admin_conf_stat.stat.exists and deployment_apply.rc is defined and deployment_apply.rc == 0
+      failed_when: false
+
+- name: Run NFS storage tests
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if admin.conf exists
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+
+    - name: Check if NFS storage class exists
+      ansible.builtin.command: kubectl get storageclass nfs-storage
+      register: nfs_storage_class_exists
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Check if NFS provisioner is running
+      ansible.builtin.command: kubectl get pods -l app=nfs-client-provisioner
+      register: nfs_provisioner_check
+      changed_when: false
+      when: admin_conf_stat.stat.exists and nfs_storage_class_exists.rc is defined and nfs_storage_class_exists.rc == 0
+      failed_when: false
+
+    - name: Display NFS provisioner status
+      ansible.builtin.debug:
+        var: nfs_provisioner_check.stdout_lines
+      when: nfs_provisioner_check is defined and nfs_provisioner_check.stdout_lines is defined
+
+    - name: Apply NFS storage test resources
+      ansible.builtin.command: kubectl apply -f /home/admin/homelab/manifests/k8s_cluster/test/test-nfs-storage.yaml
+      register: nfs_storage_apply
+      changed_when: true
+      when: >
+        admin_conf_stat.stat.exists and
+        nfs_storage_class_exists.rc is defined and nfs_storage_class_exists.rc == 0 and
+        nfs_provisioner_check.rc is defined and nfs_provisioner_check.rc == 0 and
+        "Running" in nfs_provisioner_check.stdout
+
+    - name: Wait for NFS storage test pod to be ready
+      ansible.builtin.shell: |
+        kubectl wait --for=condition=ready pod/nfs-storage-test --timeout=30s || true
+      register: nfs_storage_wait
+      changed_when: false
+      when: >
+        admin_conf_stat.stat.exists and
+        nfs_storage_apply is defined and nfs_storage_apply.rc is defined and nfs_storage_apply.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Verify NFS storage test results
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pod nfs-storage-test -o wide | grep Running &&
+        kubectl exec -it nfs-storage-test -- cat /data/nfs-test.txt |
+        grep -q "NFS storage test successful" && echo "NFS Storage test: SUCCESS" || echo "NFS Storage test: FAILED"
+      register: nfs_storage_result
+      changed_when: false
+      when: >
+        admin_conf_stat.stat.exists and
+        nfs_storage_wait is defined and nfs_storage_wait.rc is defined and nfs_storage_wait.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Display NFS storage test results
+      ansible.builtin.debug:
+        var: nfs_storage_result.stdout_lines
+      when: nfs_storage_result is defined and nfs_storage_result.stdout_lines is defined
+
+    - name: Clean up NFS storage test resources
+      ansible.builtin.command: kubectl delete -f /home/admin/homelab/manifests/k8s_cluster/test/test-nfs-storage.yaml
+      changed_when: true
+      when: >
+        admin_conf_stat.stat.exists and
+        nfs_storage_apply is defined and nfs_storage_apply.rc is defined and nfs_storage_apply.rc == 0
+      failed_when: false
+
+- name: Run Longhorn distributed storage tests
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if admin.conf exists
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+
+    - name: Check if Longhorn storage class exists
+      ansible.builtin.command: kubectl get storageclass longhorn-distributed
+      register: longhorn_storage_class_exists
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Check if Longhorn namespace exists
+      ansible.builtin.command: kubectl get namespace longhorn-system
+      register: longhorn_namespace_check
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+      failed_when: false
+
+    - name: Check if Longhorn is ready
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pods -n longhorn-system -l app=longhorn-ui | grep Running || echo "Longhorn UI not running"
+      register: longhorn_ui_check
+      changed_when: false
+      when: admin_conf_stat.stat.exists and longhorn_namespace_check.rc is defined and longhorn_namespace_check.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Display Longhorn status
+      ansible.builtin.debug:
+        var: longhorn_ui_check.stdout_lines
+      when: longhorn_ui_check is defined and longhorn_ui_check.stdout_lines is defined
+
+    - name: Apply Longhorn storage test resources
+      ansible.builtin.command: kubectl apply -f /home/admin/homelab/manifests/k8s_cluster/test/test-longhorn-storage.yaml
+      register: longhorn_storage_apply
+      changed_when: true
+      when: >
+        admin_conf_stat.stat.exists and
+        longhorn_storage_class_exists.rc is defined and longhorn_storage_class_exists.rc == 0 and
+        longhorn_ui_check.stdout is defined and "Longhorn UI not running" not in longhorn_ui_check.stdout
+
+    - name: Wait for Longhorn storage test pod to be ready
+      ansible.builtin.shell: |
+        kubectl wait --for=condition=ready pod/longhorn-storage-test --timeout=120s || true
+      register: longhorn_storage_wait
+      changed_when: false
+      when: >
+        admin_conf_stat.stat.exists and
+        longhorn_storage_apply is defined and longhorn_storage_apply.rc is defined and longhorn_storage_apply.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Verify Longhorn storage test results
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pod longhorn-storage-test -o wide | grep Running &&
+        kubectl exec -it longhorn-storage-test -- cat /data/longhorn-test.txt |
+        grep -q "Longhorn distributed storage test successful" && echo "Longhorn Storage test: SUCCESS" || echo "Longhorn Storage test: FAILED"
+      register: longhorn_storage_result
+      changed_when: false
+      when: >
+        admin_conf_stat.stat.exists and
+        longhorn_storage_wait is defined and longhorn_storage_wait.rc is defined and longhorn_storage_wait.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Display Longhorn storage test results
+      ansible.builtin.debug:
+        var: longhorn_storage_result.stdout_lines
+      when: longhorn_storage_result is defined and longhorn_storage_result.stdout_lines is defined
+
+    - name: Check Longhorn volume status
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl -n longhorn-system get volumes.longhorn.io || echo "Unable to get Longhorn volumes"
+      register: longhorn_volumes
+      changed_when: false
+      when: admin_conf_stat.stat.exists and longhorn_namespace_check.rc is defined and longhorn_namespace_check.rc == 0
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: Display Longhorn volume status
+      ansible.builtin.debug:
+        var: longhorn_volumes.stdout_lines
+      when: longhorn_volumes is defined and longhorn_volumes.stdout_lines is defined
+
+    - name: Clean up Longhorn storage test resources
+      ansible.builtin.command: kubectl delete -f /home/admin/homelab/manifests/k8s_cluster/test/test-longhorn-storage.yaml
+      changed_when: true
+      when: >
+        admin_conf_stat.stat.exists and
+        longhorn_storage_apply is defined and longhorn_storage_apply.rc is defined and longhorn_storage_apply.rc == 0
+      failed_when: false
+
+    - name: Generate Longhorn storage test summary
+      ansible.builtin.copy:
+        content: |
+          Kubernetes Longhorn Distributed Storage Test Results
+          ================================================
+
+          Test run completed on: {{ ansible_date_time.date }} {{ ansible_date_time.time }}
+
+          Longhorn Storage Class: {{ "Available" if longhorn_storage_class_exists.rc is defined and longhorn_storage_class_exists.rc == 0 else "Not available" }}
+          Longhorn UI: {{ "Running" if longhorn_ui_check.stdout is defined and "Longhorn UI not running" not in longhorn_ui_check.stdout else "Not running" }}
+
+          Test Results:
+          {% if longhorn_storage_result is defined and longhorn_storage_result.stdout_lines is defined %}
+          {{ longhorn_storage_result.stdout_lines | join('\n') }}
+          {% else %}
+          Longhorn Storage test: NOT RUN
+          {% endif %}
+
+          Longhorn Volumes:
+          {% if longhorn_volumes is defined and longhorn_volumes.stdout_lines is defined and "Unable to get Longhorn volumes" not in longhorn_volumes.stdout %}
+          {{ longhorn_volumes.stdout_lines | join('\n') }}
+          {% else %}
+          Unable to get volume information
+          {% endif %}
+
+          Recommendations:
+          {% if longhorn_storage_class_exists.rc is defined and longhorn_storage_class_exists.rc != 0 %}
+          - Longhorn storage class not found - verify Longhorn deployment
+          {% elif longhorn_ui_check.stdout is defined and "Longhorn UI not running" in longhorn_ui_check.stdout %}
+          - Longhorn UI not running - check pod logs and ensure Longhorn is properly deployed
+          {% elif longhorn_storage_result is defined and "SUCCESS" not in longhorn_storage_result.stdout %}
+          - Longhorn storage test failed - verify Longhorn deployment and manager logs
+          - Check that iscsid is running on all worker nodes
+          - Verify Longhorn settings in the UI
+          {% else %}
+          - Longhorn distributed storage appears to be working correctly
+          - Consider using Longhorn storage for workloads requiring high availability
+          - Remember that Longhorn performs best with at least 3 worker nodes for replica distribution
+          {% endif %}
+        dest: /home/admin/homelab/longhorn-test-results.txt
+        mode: '0644'
+      when: admin_conf_stat.stat.exists and (longhorn_storage_class_exists.rc is defined or longhorn_namespace_check.rc is defined)
+
+    - name: Display Longhorn test results summary
+      ansible.builtin.command: cat /home/admin/homelab/longhorn-test-results.txt
+      register: longhorn_test_summary
+      changed_when: false
+      when: admin_conf_stat.stat.exists and (longhorn_storage_class_exists.rc is defined or longhorn_namespace_check.rc is defined)
+
+    - name: Display final Longhorn test summary
+      ansible.builtin.debug:
+        var: longhorn_test_summary.stdout_lines
+      when: longhorn_test_summary is defined and longhorn_test_summary.stdout_lines is defined
+
+- name: Generate combined test report
+  hosts: "disasterarea"
+  become: true
+  remote_user: admin
+  tasks:
+    - name: Check if admin.conf exists
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_stat
+
+    - name: Generate test summary
+      ansible.builtin.copy:
+        content: |
+          Kubernetes Cluster Test Results
+          ===============================
+
+          Test run completed on: {{ ansible_date_time.date }} {{ ansible_date_time.time }}
+
+          Cluster Status: {{ 'HEALTHY' if (node_status is defined and node_status.stdout is defined and 'NotReady' not in node_status.stdout) else 'ISSUES DETECTED' }}
+
+          Components:
+          - Nodes: {{ node_status.stdout_lines | length - 1 if node_status is defined and node_status.stdout_lines is defined else 'N/A' }} nodes
+          - API Server: {{ api_health.stdout if api_health is defined and api_health.stdout is defined else 'N/A' }}
+
+          Tests:
+          - Network (Pod to Pod): {{ pod_to_pod.stdout if pod_to_pod is defined and pod_to_pod.stdout is defined else 'SKIPPED' }}
+          - Network (Pod to Service): {{ pod_to_service.stdout if pod_to_service is defined and pod_to_service.stdout is defined else 'SKIPPED' }}
+          - Local Storage: {{ storage_result.stdout if storage_result is defined and storage_result.stdout is defined else 'SKIPPED' }}
+          - NFS Storage: {{ nfs_storage_result.stdout if nfs_storage_result is defined and nfs_storage_result.stdout is defined else 'SKIPPED' }}
+          - Longhorn Storage: {{ longhorn_storage_result.stdout if longhorn_storage_result is defined and longhorn_storage_result.stdout is defined else 'SKIPPED' }}
+          - Workload: {{ service_access.stdout if service_access is defined and service_access.stdout is defined else 'SKIPPED' }}
+
+          Storage Systems Available:
+          - Local Storage: {{ 'AVAILABLE' if storage_class_exists is defined and storage_class_exists.rc is defined and storage_class_exists.rc == 0 else 'NOT AVAILABLE' }}
+          - NFS Storage: {{ 'AVAILABLE' if nfs_storage_class_exists is defined and nfs_storage_class_exists.rc is defined and nfs_storage_class_exists.rc == 0 else 'NOT AVAILABLE' }}
+          - Longhorn Storage: {{ 'AVAILABLE' if longhorn_storage_class_exists is defined and longhorn_storage_class_exists.rc is defined and longhorn_storage_class_exists.rc == 0 else 'NOT AVAILABLE' }}
+
+          Recommendations:
+          {% if node_status is defined and node_status.stdout is defined and 'NotReady' in node_status.stdout %}
+          - Check nodes that are in NotReady state
+          {% endif %}
+          {% if failed_pods is defined and failed_pods.stdout is defined and 'No failed' not in failed_pods.stdout %}
+          - Investigate failed or pending pods
+          {% endif %}
+          {% if longhorn_storage_class_exists is defined and longhorn_storage_class_exists.rc is defined and longhorn_storage_class_exists.rc != 0 and longhorn_namespace_check is defined and longhorn_namespace_check.rc is defined and longhorn_namespace_check.rc == 0 %}
+          - Longhorn is installed but storage class is missing - check Longhorn manager logs
+          {% endif %}
+
+          For more details, check the individual test reports:
+          - Basic cluster health: /home/admin/homelab/k8s-test-results.txt
+          - NFS storage: /home/admin/homelab/nfs-test-results.txt
+          - Longhorn storage: /home/admin/homelab/longhorn-test-results.txt
+        dest: /home/admin/homelab/kubernetes-test-report.txt
+        mode: '0644'
+      when: admin_conf_stat.stat.exists
+
+    - name: Display test results summary
+      ansible.builtin.command: cat /home/admin/homelab/kubernetes-test-report.txt
+      register: test_summary
+      changed_when: false
+      when: admin_conf_stat.stat.exists
+
+    - name: Display final test summary
+      ansible.builtin.debug:
+        var: test_summary.stdout_lines
+      when: test_summary is defined and test_summary.stdout_lines is defined

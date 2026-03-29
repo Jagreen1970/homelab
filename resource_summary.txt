@@ -1,0 +1,30 @@
+HOMELAB RESOURCE SUMMARY (2026-03-21)
+=====================================================================
+
+arthur (192.168.1.24):
+  CPU: 1 x 4 cores
+  RAM: 15.4GB total / 13.7GB free
+  Disk: 467.3GB total / 417.2GB free on /
+disasterarea (192.168.1.166):
+  CPU: 1 x 4 cores
+  RAM: 15.4GB total / 13.9GB free
+  Disk: 97.9GB total / 85.3GB free on /
+ford (192.168.1.76):
+  CPU: 1 x 4 cores
+  RAM: 15.5GB total / 13.8GB free
+  Disk: 467.3GB total / 414.8GB free on /
+trillian (192.168.1.67):
+  CPU: 1 x 4 cores
+  RAM: 11.5GB total / 9.8GB free
+  Disk: 232.6GB total / 194.8GB free on /
+
+KUBERNETES NODES: 4
+KUBERNETES CONTROL PLANES: 1
+KUBERNETES WORKERS: 3
+DOCKER HOSTS: 4
+STORAGE HOSTS: 0
+
+TOTAL COMPUTE CAPACITY:
+  CPU Cores: 16
+  RAM: 57.8GB
+  Disk: 1267.2GB

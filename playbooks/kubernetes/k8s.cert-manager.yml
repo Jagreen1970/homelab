@@ -1,0 +1,60 @@
+---
+# Playbook to install and configure cert-manager for TLS certificate management
+- name: Install and configure cert-manager
+  hosts: localhost
+  vars_files:
+    - k8s_vars.yml
+
+  tasks:
+    - name: Create cert-manager namespace
+      kubernetes.core.k8s:
+        name: cert-manager
+        kind: Namespace
+        api_version: v1
+        state: present
+
+    - name: Apply cert-manager installation manifest
+      ansible.builtin.shell: |
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
+      register: installation_result
+      changed_when: installation_result.rc == 0
+
+    - name: Wait for cert-manager deployment to be ready
+      ansible.builtin.shell: |
+        kubectl -n cert-manager wait --for=condition=available --timeout=300s deployment/cert-manager
+      register: cert_manager_ready
+      changed_when: false
+      failed_when: cert_manager_ready.rc != 0
+
+    - name: Wait for cert-manager webhook deployment to be ready
+      ansible.builtin.shell: |
+        kubectl -n cert-manager wait --for=condition=available --timeout=300s deployment/cert-manager-webhook
+      register: webhook_ready
+      changed_when: false
+      failed_when: webhook_ready.rc != 0
+
+    - name: Wait for cert-manager cainjector deployment to be ready
+      ansible.builtin.shell: |
+        kubectl -n cert-manager wait --for=condition=available --timeout=300s deployment/cert-manager-cainjector
+      register: cainjector_ready
+      changed_when: false
+      failed_when: cainjector_ready.rc != 0
+
+    - name: Apply self-signed issuer configuration
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ playbook_dir }}/../../manifests/cert-manager/selfsigned-issuer.yaml"
+      register: issuer_result
+
+    - name: Verify cert-manager installation
+      ansible.builtin.shell: |
+        kubectl get clusterissuers
+        echo "---"
+        kubectl get pods -n cert-manager
+      register: status
+      changed_when: false
+      failed_when: status.rc != 0
+
+    - name: Display cert-manager status
+      ansible.builtin.debug:
+        msg: "{{ status.stdout_lines }}"

@@ -1,0 +1,31 @@
+---
+# Kubernetes configuration variables
+k8s_version: "1.28.0"
+k8s_target_version: "1.29.0"  # Set to the next minor version before each upgrade pass
+pod_network_cidr: "10.244.0.0/16"
+k8s_admin_user: "k8s-admin"
+dashboard_version: "v2.7.0"
+dashboard_namespace: "kubernetes-dashboard"
+
+# Node roles
+control_plane_node: "disasterarea"
+worker_nodes:
+  - "arthur"
+  - "ford"
+  - "trillian"
+
+# Container runtime
+container_runtime: "containerd"
+cni_plugin: "flannel"
+
+# Ingress
+ingress_nginx_version: "1.11.2"  # Check compatibility with your K8s version before upgrading
+
+# Logging configuration
+logging_namespace: "monitoring"
+logging_release_name: "logging-stack"
+logging_chart_version: "2.10.2"
+loki_storage_size: "10Gi"
+grafana_storage_size: "5Gi"
+grafana_node_port: 30000
+loki_retention_period: "672h"  # 28 days

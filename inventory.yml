@@ -2,10 +2,31 @@
 homelab:
   hosts:
     disasterarea:
-      ansible_host: disasterarea
+      ansible_host: disasterarea.lab
     arthur:
-      ansible_host: arthur
+      ansible_host: arthur.lab
     ford:
-      ansible_host: ford
+      ansible_host: ford.lab
     trillian:
-      ansible_host: trillian
+      ansible_host: trillian.lab
+  children:
+    k8s_control_plane:
+      hosts:
+        disasterarea:
+    k8s_workers:
+      hosts:
+        arthur:
+        ford:
+        trillian:
+    docker_hosts:
+      hosts:
+        disasterarea:
+        arthur:
+        ford:
+        trillian:
+    opnsense:
+      hosts:
+        opnsense_fw:
+          ansible_host: 192.168.1.1
+          ansible_connection: local  # ansibleguy.opnsense uses REST API calls from controller
+          ansible_python_interpreter: "{{ playbook_dir }}/../../.venv/bin/python3"
